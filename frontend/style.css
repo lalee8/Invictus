@@ -1,0 +1,412 @@
+/* ===== Colors and base sizes ===== */
+:root {
+  --bg: #0f172a;          /* dark background */
+  --card: #1e293b;        /* card background */
+  --text: #f8fafc;        /* white text */
+  --muted: #94a3b8;       /* gray text */
+  --primary: #3b82f6;     /* blue button */
+  --success: #22c55e;     /* green */
+  --danger: #ef4444;      /* red */
+  --focus: #facc15;       /* focus ring (yellow) */
+  --radius: 14px;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Segoe UI", Arial, sans-serif;
+  font-size: 20px;
+  line-height: 1.5;
+  min-height: 100vh;
+}
+
+/* Used to hide screens */
+.hidden {
+  display: none !important;
+}
+
+/* ===== Header ===== */
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 18px 28px;
+  background: var(--card);
+  border-bottom: 2px solid #334155;
+}
+
+header h1 {
+  font-size: 26px;
+}
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 16px;
+  color: var(--muted);
+}
+
+.status-group {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+#status-dot,
+#device-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+#status-dot.online,
+#device-dot.online  { background: var(--success); }
+#status-dot.offline,
+#device-dot.offline { background: var(--danger); }
+
+/* ===== Screens (cards) ===== */
+main {
+  display: flex;
+  justify-content: center;
+  padding: 40px 16px;
+}
+
+section {
+  width: 100%;
+  max-width: 520px;
+  background: var(--card);
+  border-radius: var(--radius);
+  padding: 32px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+
+section h2 {
+  font-size: 28px;
+  margin-bottom: 24px;
+  text-align: center;
+}
+
+section p {
+  margin-bottom: 10px;
+}
+
+#dash-balance {
+  font-size: 32px;
+  font-weight: bold;
+  color: var(--success);
+}
+
+/* ===== Form elements ===== */
+label {
+  display: block;
+  margin: 14px 0 6px;
+  font-weight: 600;
+}
+
+input,
+select {
+  width: 100%;
+  padding: 14px 16px;
+  font-size: 20px;
+  border: 2px solid #475569;
+  border-radius: 10px;
+  background: #0f172a;
+  color: var(--text);
+}
+
+/* ===== Buttons ===== */
+button {
+  width: 100%;
+  min-height: 60px;
+  margin-top: 14px;
+  font-size: 20px;
+  font-weight: 600;
+  border: none;
+  border-radius: 10px;
+  background: var(--primary);
+  color: white;
+  cursor: pointer;
+  transition: transform 0.1s, filter 0.2s;
+}
+
+button:hover  { filter: brightness(1.15); }
+button:active { transform: scale(0.98); }
+
+/* Secondary buttons */
+.secondary,
+#btn-go-register,
+#btn-back-login,
+#btn-cancel,
+#btn-history-back {
+  background: #475569;
+}
+
+#btn-logout  { background: var(--danger); }
+.success     { background: var(--success); }
+#btn-confirm { background: var(--success); }
+
+/* Clear focus for keyboard users */
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 4px solid var(--focus);
+  outline-offset: 3px;
+}
+
+/* Dashboard buttons 2x2 */
+.actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin: 20px 0;
+}
+
+.actions button {
+  margin-top: 0;
+  min-height: 90px;
+}
+
+/* Amount panel */
+#amount-panel {
+  padding: 18px;
+  margin-bottom: 10px;
+  border: 2px dashed var(--primary);
+  border-radius: 10px;
+}
+
+/* ===== Messages ===== */
+.msg {
+  margin-top: 16px;
+  min-height: 1.5em;
+  text-align: center;
+  font-weight: 600;
+}
+
+.msg.success { color: var(--success); }
+.msg.error   { color: var(--danger); }
+
+/* ===== History table ===== */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 16px;
+}
+
+th,
+td {
+  padding: 10px 8px;
+  text-align: left;
+  border-bottom: 1px solid #334155;
+}
+
+th {
+  color: var(--muted);
+}
+
+.type-deposit  { color: var(--success); font-weight: bold; }
+.type-withdraw { color: var(--danger);  font-weight: bold; }
+
+/* ===== Home: module selection ===== */
+.modules {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.module-btn {
+  margin-top: 0;
+  min-height: 180px;
+  font-size: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.module-btn.hospital {
+  background: #0d9488;
+}
+
+.module-icon {
+  font-size: 56px;
+}
+
+.label-like {
+  margin: 18px 0 0;
+  font-weight: 600;
+}
+
+/* Hospital department buttons */
+#departments button {
+  background: #0d9488;
+}
+
+/* ===== Queue ticket ===== */
+.ticket {
+  background: #f8fafc;
+  color: #0f172a;
+  border-radius: var(--radius);
+  padding: 24px;
+  text-align: center;
+  border: 3px dashed #0d9488;
+}
+
+.ticket p {
+  margin-bottom: 6px;
+}
+
+.ticket-dept {
+  font-size: 22px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: #0d9488;
+}
+
+.ticket-number {
+  font-size: 72px;
+  font-weight: 800;
+  letter-spacing: 4px;
+  line-height: 1.1;
+}
+
+.ticket-time {
+  font-size: 15px;
+  color: #64748b;
+}
+
+/* ===== Home tools ===== */
+.tools {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.tools button {
+  margin-top: 0;
+}
+
+/* ===== Ticket extras ===== */
+.badge {
+  display: inline-block;
+  background: #fde68a;
+  color: #92400e;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.ticket-status {
+  font-weight: 700;
+  font-size: 22px;
+  color: #0d9488;
+}
+
+.ticket-status.called {
+  color: var(--danger);
+  animation: pulse 1s infinite;
+}
+
+/* ===== Doctor panel ===== */
+.now-serving {
+  text-align: center;
+  margin: 20px 0 6px;
+  padding: 16px;
+  border-radius: var(--radius);
+  background: #0f172a;
+  border: 2px solid #0d9488;
+}
+
+.waiting-list {
+  list-style: none;
+  padding: 0;
+  margin-top: 8px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.waiting-list li {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid #334155;
+  font-size: 17px;
+}
+
+.waiting-list li strong {
+  color: #5eead4;
+}
+
+/* ===== ESP32 ===== */
+.device-info {
+  margin-top: 18px;
+  padding: 14px;
+  border-radius: 10px;
+  background: #0f172a;
+  font-family: Consolas, monospace;
+  font-size: 15px;
+  white-space: pre-wrap;
+  color: var(--muted);
+}
+
+/* ===== Voice command ===== */
+#voice-box {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  max-width: 320px;
+}
+
+#voice-text {
+  background: var(--card);
+  padding: 8px 14px;
+  border-radius: 10px;
+  font-size: 15px;
+  color: var(--muted);
+}
+
+#btn-voice {
+  width: auto;
+  padding: 0 28px;
+  min-height: 70px;
+  border-radius: 999px;
+  background: #8b5cf6;
+  font-size: 20px;
+  box-shadow: 0 6px 20px rgba(139, 92, 246, 0.5);
+}
+
+/* Red and pulsing while listening */
+#btn-voice.listening {
+  background: var(--danger);
+  animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.08); }
+}
+
+/* ===== Mobile ===== */
+@media (max-width: 480px) {
+  body { font-size: 18px; }
+  section { padding: 22px; }
+  .actions { grid-template-columns: 1fr; }
+  .modules { grid-template-columns: 1fr; }
+  .tools { grid-template-columns: 1fr; }
+  .module-btn { min-height: 130px; }
+}

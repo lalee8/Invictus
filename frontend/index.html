@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ResiliNode AI</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- HEADER -->
+  <header>
+    <h1>ResiliNode AI</h1>
+    <div class="status-group">
+      <div class="status">
+        <span id="status-dot"></span>
+        <span id="status-text">Checking...</span>
+      </div>
+      <div class="status">
+        <span id="device-dot"></span>
+        <span id="device-text">ESP32: not connected</span>
+      </div>
+    </div>
+  </header>
+
+  <main>
+
+    <!-- 0. HOME: module selection -->
+    <section id="screen-home">
+      <h2>Choose a service</h2>
+      <div class="modules">
+        <button id="btn-module-bank" class="module-btn">
+          <span class="module-icon">🏦</span>
+          Bank
+        </button>
+        <button id="btn-module-hospital" class="module-btn hospital">
+          <span class="module-icon">🏥</span>
+          Hospital
+        </button>
+      </div>
+
+      <div class="tools">
+        <button id="btn-module-doctor" class="secondary">👩‍⚕️ Doctor panel</button>
+        <button id="btn-module-device" class="secondary">🔌 ESP32 device</button>
+      </div>
+    </section>
+
+    <!-- 1. LOGIN -->
+    <section id="screen-login">
+      <h2>Login</h2>
+
+      <label for="login-id">Account ID</label>
+      <input type="number" id="login-id" placeholder="e.g. 3">
+
+      <label for="login-pin">PIN</label>
+      <input type="password" id="login-pin" maxlength="4" inputmode="numeric" placeholder="4 digits">
+
+      <button id="btn-login">Log in</button>
+      <button id="btn-go-register">Open new account</button>
+      <button id="btn-login-home" class="secondary">Home</button>
+
+      <p class="msg" id="login-msg"></p>
+    </section>
+
+    <!-- 2. REGISTER -->
+    <section id="screen-register">
+      <h2>New account</h2>
+
+      <label for="reg-name">Full name</label>
+      <input type="text" id="reg-name" placeholder="Full name">
+
+      <label for="reg-pin">PIN</label>
+      <input type="password" id="reg-pin" maxlength="4" inputmode="numeric" placeholder="4 digits">
+
+      <label for="reg-currency">Currency</label>
+      <select id="reg-currency">
+        <option value="AZN">AZN</option>
+        <option value="USD">USD</option>
+        <option value="EUR">EUR</option>
+      </select>
+
+      <button id="btn-register">Open account</button>
+      <button id="btn-back-login">Back</button>
+
+      <p class="msg" id="reg-msg"></p>
+    </section>
+
+    <!-- 3. DASHBOARD -->
+    <section id="screen-dashboard">
+      <h2>Welcome</h2>
+
+      <p>Account: <span id="dash-number">-</span></p>
+      <p>Balance: <span id="dash-balance">0.00</span></p>
+
+      <div class="actions">
+        <button id="btn-deposit">Deposit</button>
+        <button id="btn-withdraw">Withdraw</button>
+        <button id="btn-balance">Balance</button>
+        <button id="btn-history">History</button>
+      </div>
+
+      <div id="amount-panel">
+        <label for="amount">Amount</label>
+        <input type="number" id="amount" min="1" placeholder="Amount">
+        <button id="btn-confirm">Confirm</button>
+        <button id="btn-cancel">Cancel</button>
+      </div>
+
+      <button id="btn-logout">Log out</button>
+
+      <p class="msg" id="dash-msg"></p>
+    </section>
+
+    <!-- 4. HISTORY -->
+    <section id="screen-history">
+      <h2>Transaction history</h2>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Type</th>
+            <th>Amount</th>
+            <th>Balance</th>
+          </tr>
+        </thead>
+        <tbody id="history-body"></tbody>
+      </table>
+
+      <button id="btn-history-back">Back</button>
+    </section>
+
+    <!-- 5. HOSPITAL: department selection -->
+    <section id="screen-hospital">
+      <h2>Doctor queue</h2>
+
+      <label for="patient-name">Full name</label>
+      <input type="text" id="patient-name" placeholder="Full name">
+
+      <p class="label-like">Choose a department</p>
+      <div class="actions" id="departments">
+        <button data-dept="general">🩺 General Practice</button>
+        <button data-dept="cardiology">❤️ Cardiology</button>
+        <button data-dept="pediatrics">👶 Pediatrics</button>
+        <button data-dept="dentistry">🦷 Dentistry</button>
+      </div>
+
+      <button id="btn-hospital-home" class="secondary">Home</button>
+
+      <p class="msg" id="hospital-msg"></p>
+    </section>
+
+    <!-- 6. HOSPITAL: queue ticket -->
+    <section id="screen-ticket">
+      <h2>Your queue ticket</h2>
+
+      <div class="ticket">
+        <p class="badge hidden" id="ticket-offline">⚠️ Offline ticket</p>
+        <p class="ticket-dept" id="ticket-dept">-</p>
+        <p class="ticket-number" id="ticket-number">-</p>
+        <p id="ticket-name">-</p>
+        <p>People ahead: <strong id="ticket-ahead">0</strong></p>
+        <p>Estimated wait: <strong id="ticket-wait">0</strong> min</p>
+        <p class="ticket-status" id="ticket-status">Waiting</p>
+        <p class="ticket-time" id="ticket-time">-</p>
+      </div>
+
+      <button id="btn-ticket-refresh">🔄 Refresh status</button>
+      <button id="btn-ticket-repeat">🔊 Read again</button>
+      <button id="btn-ticket-done" class="secondary">Done</button>
+    </section>
+
+    <!-- 7. DOCTOR PANEL -->
+    <section id="screen-doctor">
+      <h2>Doctor panel</h2>
+
+      <label for="doctor-dept">Department</label>
+      <select id="doctor-dept">
+        <option value="general">General Practice</option>
+        <option value="cardiology">Cardiology</option>
+        <option value="pediatrics">Pediatrics</option>
+        <option value="dentistry">Dentistry</option>
+      </select>
+
+      <div class="now-serving">
+        <p>Now serving:</p>
+        <p class="ticket-number" id="doctor-current">—</p>
+        <p id="doctor-current-name"></p>
+      </div>
+
+      <button id="btn-call-next" class="success">📢 Call next patient</button>
+
+      <p class="label-like">Waiting (<span id="doctor-count">0</span>)</p>
+      <ul id="doctor-waiting" class="waiting-list"></ul>
+
+      <button id="btn-doctor-home" class="secondary">Home</button>
+      <p class="msg" id="doctor-msg"></p>
+    </section>
+
+    <!-- 8. ESP32 DEVICE -->
+    <section id="screen-device">
+      <h2>ESP32 device</h2>
+
+      <label for="device-ip">Device address</label>
+      <input type="text" id="device-ip" placeholder="http://192.168.1.50 or http://resilinode.local">
+
+      <button id="btn-device-connect">Connect</button>
+      <button id="btn-device-test" class="secondary">🔔 Send test signal</button>
+      <button id="btn-device-disconnect" class="secondary">Disconnect</button>
+
+      <div class="device-info" id="device-info">No data</div>
+
+      <button id="btn-device-home" class="secondary">Home</button>
+      <p class="msg" id="device-msg"></p>
+    </section>
+
+  </main>
+
+  <!-- VOICE COMMAND (visible on every screen) -->
+  <div id="voice-box">
+    <p id="voice-text" aria-live="polite">Press the mic and speak</p>
+    <button id="btn-voice" aria-label="Voice command">🎤 Voice command</button>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
