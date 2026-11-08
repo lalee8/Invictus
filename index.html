@@ -1,0 +1,959 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ResiliNode AI - ATM Kiosk</title>
+
+    <style>
+        :root {
+            --bg-color: #f4f7f6;
+            --card-bg: #ffffff;
+            --primary-blue: #0056b3;
+            --hardware-color: #ff9800;
+            --text-dark: #333333;
+            --success: #28a745;
+            --danger: #dc3545;
+        }
+
+        * {
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        body {
+            background: var(--bg-color);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            color: var(--text-dark);
+        }
+
+        .header {
+            width: 100%;
+            max-width: 1100px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: var(--text-dark);
+            color: white;
+            padding: 15px 25px;
+            border-radius: 12px;
+            margin-bottom: 25px;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+
+        .header h1 {
+            font-size: 23px;
+            margin: 0;
+        }
+
+        .network-status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: bold;
+            font-size: 14px;
+        }
+
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: var(--success);
+        }
+
+        .container {
+            display: flex;
+            gap: 25px;
+            max-width: 1100px;
+            width: 100%;
+            flex-wrap: wrap;
+            align-items: flex-start;
+        }
+
+        .module-card {
+            background: var(--card-bg);
+            flex: 1;
+            min-width: 320px;
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.08);
+        }
+
+        .module-card h2 {
+            margin-top: 0;
+            border-bottom: 2px solid #eee;
+            padding-bottom: 12px;
+            text-align: center;
+        }
+
+        .hardware-panel {
+            background: #fff3e0;
+            border: 2px solid var(--hardware-color);
+        }
+
+        .hardware-status {
+            padding: 12px;
+            border-radius: 8px;
+            background: #ffe0b2;
+            font-weight: bold;
+            text-align: center;
+            color: #d84315;
+            margin-bottom: 15px;
+        }
+
+        .hardware-connected {
+            background: #c8e6c9 !important;
+            color: #2e7d32 !important;
+        }
+
+        input, select {
+            width: 100%;
+            padding: 12px;
+            margin: 7px 0 14px;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            font-size: 15px;
+        }
+
+        label {
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .btn {
+            display: block;
+            width: 100%;
+            padding: 13px;
+            border: none;
+            border-radius: 8px;
+            font-size: 15px;
+            font-weight: bold;
+            color: white;
+            cursor: pointer;
+            background: var(--primary-blue);
+            transition: 0.2s;
+            margin-top: 10px;
+        }
+
+        .btn:hover {
+            opacity: 0.88;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-orange {
+            background: #e65100;
+        }
+
+        .btn-green {
+            background: var(--success);
+        }
+
+        .btn-red {
+            background: var(--danger);
+        }
+
+        .btn-gray {
+            background: #555;
+        }
+
+        .btn-ai {
+            background: #ff5722;
+            padding: 15px 30px;
+            font-size: 17px;
+            border-radius: 50px;
+            max-width: 300px;
+            margin: auto;
+        }
+
+        .btn-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+
+        .btn-grid .btn {
+            margin: 0;
+        }
+
+        .btn-full {
+            grid-column: span 2;
+        }
+
+        .account-panel {
+            width: 100%;
+            max-width: 1100px;
+            margin-bottom: 25px;
+        }
+
+        .account-info {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 15px;
+        }
+
+        .info-box {
+            background: #e9f2ff;
+            border-radius: 10px;
+            padding: 16px;
+        }
+
+        .info-box small {
+            color: #555;
+        }
+
+        .info-box h3 {
+            margin: 8px 0 0;
+            color: var(--primary-blue);
+            overflow-wrap: anywhere;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        .action-panel {
+            width: 100%;
+            max-width: 1100px;
+            margin-top: 25px;
+        }
+
+        .action-content {
+            margin-top: 15px;
+            padding: 20px;
+            background: #f4f7fa;
+            border-radius: 10px;
+        }
+
+        .message {
+            padding: 12px;
+            border-radius: 8px;
+            margin: 12px 0;
+            font-weight: 600;
+            display: none;
+        }
+
+        .message.success {
+            display: block;
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .message.error {
+            display: block;
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .log-terminal {
+            margin-top: 20px;
+            background: #1e1e1e;
+            color: #4af626;
+            padding: 15px;
+            border-radius: 8px;
+            min-height: 180px;
+            max-height: 250px;
+            overflow-y: auto;
+            text-align: left;
+            font-family: monospace;
+            font-size: 13px;
+        }
+
+        .log-terminal p {
+            margin: 6px 0;
+            overflow-wrap: anywhere;
+        }
+
+        .log-ai { color: #64b5f6; }
+        .log-offline { color: #ff5252; }
+        .log-hw { color: #ff9800; }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+            font-size: 14px;
+        }
+
+        th, td {
+            text-align: left;
+            padding: 11px 8px;
+            border-bottom: 1px solid #ddd;
+        }
+
+        th {
+            background: #e9ecef;
+        }
+
+        .table-wrapper {
+            overflow-x: auto;
+        }
+
+        .ai-section {
+            width: 100%;
+            max-width: 1100px;
+            margin-top: 25px;
+            background: #e3f2fd;
+            border: 2px dashed #64b5f6;
+            border-radius: 15px;
+            padding: 20px;
+            text-align: center;
+        }
+
+        @media(max-width: 600px) {
+            body { padding: 10px; }
+            .header { padding: 15px; }
+            .header h1 { font-size: 19px; }
+            .module-card { min-width: 100%; }
+            .btn-grid { grid-template-columns: 1fr; }
+            .btn-full { grid-column: span 1; }
+        }
+    </style>
+</head>
+
+<body>
+
+<header class="header">
+    <h1>ResiliNode AI - ATM Kiosk</h1>
+
+    <div class="network-status">
+        <div class="status-dot" id="status-dot"></div>
+        <span id="status-text">Checking connection...</span>
+    </div>
+</header>
+
+<!-- ACCOUNT AUTHENTICATION -->
+<div class="container" id="auth-section">
+
+    <div class="module-card">
+        <h2>🔐 Account Login</h2>
+
+        <label>Account ID</label>
+        <input type="number" id="login-account-id" placeholder="Enter your account ID">
+
+        <label>PIN</label>
+        <input type="password" id="login-pin" placeholder="Enter your PIN" maxlength="4">
+
+        <button class="btn" onclick="login()">Login</button>
+
+        <div id="login-message" class="message"></div>
+    </div>
+
+    <div class="module-card">
+        <h2>📝 Create New Account</h2>
+
+        <label>Owner Name</label>
+        <input type="text" id="owner-name" placeholder="Full name">
+
+        <label>PIN (4 digits)</label>
+        <input type="password" id="new-pin" placeholder="Create PIN" maxlength="4">
+
+        <label>Currency</label>
+        <select id="new-currency">
+            <option value="AZN">AZN - Manat</option>
+            <option value="USD">USD - Dollar</option>
+            <option value="EUR">EUR - Euro</option>
+        </select>
+
+        <button class="btn btn-green" onclick="createAccount()">
+            Create Account
+        </button>
+
+        <div id="create-message" class="message"></div>
+    </div>
+
+</div>
+
+<!-- ACCOUNT DASHBOARD -->
+<div class="module-card account-panel hidden" id="dashboard">
+
+    <h2>👤 Account Dashboard</h2>
+
+    <div class="account-info">
+        <div class="info-box">
+            <small>Account Holder</small>
+            <h3 id="account-owner">-</h3>
+        </div>
+
+        <div class="info-box">
+            <small>Account Number</small>
+            <h3 id="account-number">-</h3>
+        </div>
+
+        <div class="info-box">
+            <small>Account ID</small>
+            <h3 id="account-id">-</h3>
+        </div>
+
+        <div class="info-box">
+            <small>Available Balance</small>
+            <h3 id="account-balance">0.00 AZN</h3>
+        </div>
+    </div>
+
+    <button class="btn btn-gray" onclick="logout()">Logout</button>
+
+</div>
+
+<div class="container">
+
+    <!-- ESP32 HARDWARE -->
+    <div class="module-card hardware-panel">
+        <h2>🔌 ESP32 Hardware Node</h2>
+
+        <div class="hardware-status" id="hw-status">
+            Disconnected (Waiting...)
+        </div>
+
+        <label>ESP32 IP Address</label>
+        <input type="text" id="esp-ip"
+               value="http://192.168.4.1">
+
+        <button class="btn btn-orange" onclick="connectHardware()">
+            Connect Hardware
+        </button>
+
+        <button class="btn btn-orange"
+                onclick="simulateHardwareSensor('motion')">
+            📷 Simulate Camera
+        </button>
+    </div>
+
+    <!-- ATM SERVICES -->
+    <div class="module-card">
+        <h2>🏛️ ATM Services</h2>
+
+        <div class="btn-grid">
+            <button class="btn" onclick="showAction('deposit')">
+                📥 Deposit Cash
+            </button>
+
+            <button class="btn" onclick="showAction('withdraw')">
+                📤 Withdraw Cash
+            </button>
+
+            <button class="btn" onclick="checkBalance()">
+                💳 Check Balance
+            </button>
+
+            <button class="btn" onclick="getTransactions()">
+                📄 Mini Statement
+            </button>
+        </div>
+    </div>
+
+</div>
+
+<!-- ATM ACTION FORMS -->
+<div class="module-card action-panel hidden" id="action-panel">
+    <h2 id="action-title">ATM Operation</h2>
+
+    <div class="action-content">
+
+        <div id="amount-section">
+            <label>Amount</label>
+            <input type="number" id="transaction-amount"
+                   min="0.01" step="0.01" placeholder="Enter amount">
+        </div>
+
+        <button class="btn btn-green" id="submit-transaction"
+                onclick="submitTransaction()">
+            Confirm Transaction
+        </button>
+
+        <button class="btn btn-gray" onclick="closeAction()">
+            Cancel
+        </button>
+
+    </div>
+
+    <div id="transaction-message" class="message"></div>
+</div>
+
+<!-- TRANSACTION HISTORY -->
+<div class="module-card action-panel hidden" id="history-panel">
+    <h2>📄 Transaction History</h2>
+
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Type</th>
+                    <th>Amount</th>
+                    <th>Balance After</th>
+                    <th>Date</th>
+                </tr>
+            </thead>
+
+            <tbody id="transaction-list"></tbody>
+        </table>
+    </div>
+</div>
+
+<!-- AI TERMINAL -->
+<div class="ai-section">
+    <button class="btn btn-ai" onclick="startVoiceAI()">
+        🎙️ Force Start Voice AI
+    </button>
+
+    <div class="log-terminal" id="log-terminal">
+        <p>> ResiliNode AI Kiosk initialized.</p>
+        <p>> Waiting for account authentication...</p>
+    </div>
+</div>
+
+<script>
+    // API CONFIGURATION
+    const API_BASE_URL = "http://127.0.0.1:8000";
+
+    const statusDot = document.getElementById("status-dot");
+    const statusText = document.getElementById("status-text");
+    const logTerminal = document.getElementById("log-terminal");
+
+    let currentAccount = null;
+    let currentPin = null;
+    let currentAction = null;
+    let isHardwareConnected = false;
+
+    // API REQUEST HELPER
+    async function apiRequest(endpoint, options = {}) {
+        const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+            ...options,
+            headers: {
+                "Content-Type": "application/json",
+                ...options.headers
+            }
+        });
+
+        const data = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+            const detail = data.detail;
+            const errorMessage = typeof detail === "string"
+                ? detail
+                : Array.isArray(detail)
+                    ? detail.map(item => item.msg).join(", ")
+                    : "Request failed";
+
+            throw new Error(errorMessage);
+        }
+
+        return data;
+    }
+
+    // LOGGING
+    function addLog(message, className = "") {
+        const p = document.createElement("p");
+        const time = new Date().toLocaleTimeString();
+
+        const timestamp = document.createElement("span");
+        timestamp.style.color = "#aaa";
+        timestamp.textContent = `[${time}] `;
+
+        const content = document.createElement("span");
+        content.className = className;
+        content.textContent = message;
+
+        p.append(timestamp, content);
+        logTerminal.appendChild(p);
+        logTerminal.scrollTop = logTerminal.scrollHeight;
+    }
+
+    function showMessage(elementId, message, type) {
+        const element = document.getElementById(elementId);
+        element.textContent = message;
+        element.className = `message ${type}`;
+    }
+
+    // NETWORK STATUS
+    async function updateNetworkStatus() {
+        try {
+            await fetch(`${API_BASE_URL}/health`);
+            statusDot.style.background = "#28a745";
+            statusText.textContent = "Backend Online";
+        } catch {
+            statusDot.style.background = "#dc3545";
+            statusText.textContent = "Backend Offline";
+        }
+    }
+
+    window.addEventListener("online", updateNetworkStatus);
+    window.addEventListener("offline", updateNetworkStatus);
+
+    // CREATE ACCOUNT
+    async function createAccount() {
+        const ownerName = document.getElementById("owner-name").value.trim();
+        const pin = document.getElementById("new-pin").value;
+        const currency = document.getElementById("new-currency").value;
+
+        if (!ownerName || !/^\d{4}$/.test(pin)) {
+            showMessage(
+                "create-message",
+                "Enter your name and a valid 4-digit PIN.",
+                "error"
+            );
+            return;
+        }
+
+        try {
+            const account = await apiRequest("/accounts/", {
+                method: "POST",
+                body: JSON.stringify({
+                    owner_name: ownerName,
+                    pin: pin,
+                    currency: currency
+                })
+            });
+
+            showMessage(
+                "create-message",
+                `Account created! ID: ${account.id} | Account Number: ${account.account_number}. Save these details!`,
+                "success"
+            );
+
+            document.getElementById("login-account-id").value = account.id;
+            document.getElementById("login-pin").value = pin;
+
+            addLog(`New account created: ${account.account_number}`);
+        } catch (error) {
+            showMessage("create-message", error.message, "error");
+        }
+    }
+
+    // LOGIN
+    async function login() {
+        const accountId = document.getElementById("login-account-id").value;
+        const pin = document.getElementById("login-pin").value;
+
+        if (!accountId || !/^\d{4}$/.test(pin)) {
+            showMessage(
+                "login-message",
+                "Enter a valid Account ID and 4-digit PIN.",
+                "error"
+            );
+            return;
+        }
+
+        try {
+            const balance = await apiRequest(
+                `/accounts/${accountId}/balance?pin=${encodeURIComponent(pin)}`
+            );
+
+            currentAccount = {
+                id: Number(accountId),
+                account_number: balance.account_number,
+                currency: balance.currency,
+                owner_name: "Account Holder"
+            };
+
+            currentPin = pin;
+
+            document.getElementById("account-owner").textContent =
+                currentAccount.owner_name;
+
+            document.getElementById("account-number").textContent =
+                balance.account_number;
+
+            document.getElementById("account-id").textContent =
+                accountId;
+
+            document.getElementById("account-balance").textContent =
+                `${balance.balance} ${balance.currency}`;
+
+            document.getElementById("auth-section").classList.add("hidden");
+            document.getElementById("dashboard").classList.remove("hidden");
+
+            showMessage("login-message", "", "success");
+
+            addLog(`Account ${balance.account_number} authenticated.`);
+            addLog("ATM services are now available.");
+
+        } catch (error) {
+            showMessage("login-message", error.message, "error");
+        }
+    }
+
+    // LOGOUT
+    function logout() {
+        currentAccount = null;
+        currentPin = null;
+
+        document.getElementById("auth-section").classList.remove("hidden");
+        document.getElementById("dashboard").classList.add("hidden");
+
+        closeAction();
+
+        document.getElementById("history-panel").classList.add("hidden");
+
+        addLog("User logged out.");
+    }
+
+    // SHOW ATM OPERATION FORM
+    function showAction(action) {
+        if (!requireLogin()) return;
+
+        currentAction = action;
+
+        document.getElementById("history-panel").classList.add("hidden");
+        document.getElementById("action-panel").classList.remove("hidden");
+
+        const titles = {
+            deposit: "📥 Deposit Cash",
+            withdraw: "📤 Withdraw Cash"
+        };
+
+        document.getElementById("action-title").textContent = titles[action];
+        document.getElementById("transaction-amount").value = "";
+        document.getElementById("transaction-message").className = "message";
+
+        document.getElementById("submit-transaction").disabled = false;
+    }
+
+    function closeAction() {
+        currentAction = null;
+        document.getElementById("action-panel").classList.add("hidden");
+    }
+
+    function requireLogin() {
+        if (!currentAccount || !currentPin) {
+            addLog("Please login before using ATM services.", "log-offline");
+            alert("Please login first.");
+            return false;
+        }
+
+        return true;
+    }
+
+    // DEPOSIT AND WITHDRAW
+    async function submitTransaction() {
+        if (!requireLogin() || !currentAction) return;
+
+        const amount = Number(
+            document.getElementById("transaction-amount").value
+        );
+
+        if (!Number.isFinite(amount) || amount <= 0) {
+            showMessage(
+                "transaction-message",
+                "Please enter a valid positive amount.",
+                "error"
+            );
+            return;
+        }
+
+        const button = document.getElementById("submit-transaction");
+        button.disabled = true;
+
+        try {
+            const endpoint = currentAction === "deposit"
+                ? "deposit"
+                : "withdraw";
+
+            const result = await apiRequest(
+                `/accounts/${currentAccount.id}/${endpoint}`,
+                {
+                    method: "POST",
+                    body: JSON.stringify({
+                        pin: currentPin,
+                        amount: amount
+                    })
+                }
+            );
+
+            showMessage(
+                "transaction-message",
+                `${result.transaction_type} successful! Amount: ${result.amount} ${result.currency}. New balance: ${result.balance_after} ${result.currency}.`,
+                "success"
+            );
+
+            document.getElementById("account-balance").textContent =
+                `${result.balance_after} ${result.currency}`;
+
+            addLog(
+                `${result.transaction_type}: ${result.amount} ${result.currency}`,
+                "log-ai"
+            );
+
+        } catch (error) {
+            showMessage("transaction-message", error.message, "error");
+            addLog(`Transaction failed: ${error.message}`, "log-offline");
+        } finally {
+            button.disabled = false;
+        }
+    }
+
+    // CHECK BALANCE
+    async function checkBalance() {
+        if (!requireLogin()) return;
+
+        try {
+            const result = await apiRequest(
+                `/accounts/${currentAccount.id}/balance?pin=${encodeURIComponent(currentPin)}`
+            );
+
+            document.getElementById("account-balance").textContent =
+                `${result.balance} ${result.currency}`;
+
+            addLog(
+                `Current balance: ${result.balance} ${result.currency}`,
+                "log-ai"
+            );
+
+        } catch (error) {
+            addLog(`Balance request failed: ${error.message}`, "log-offline");
+        }
+    }
+
+    // TRANSACTION HISTORY
+    async function getTransactions() {
+        if (!requireLogin()) return;
+
+        try {
+            const transactions = await apiRequest(
+                `/accounts/${currentAccount.id}/transactions?pin=${encodeURIComponent(currentPin)}`
+            );
+
+            const list = document.getElementById("transaction-list");
+            list.replaceChildren();
+
+            if (transactions.length === 0) {
+                const row = list.insertRow();
+                const cell = row.insertCell();
+                cell.colSpan = 5;
+                cell.textContent = "No transactions yet.";
+            }
+
+            transactions.forEach(transaction => {
+                const row = list.insertRow();
+
+                const values = [
+                    transaction.id,
+                    transaction.transaction_type,
+                    `${transaction.amount} ${transaction.currency}`,
+                    `${transaction.balance_after} ${transaction.currency}`,
+                    new Date(transaction.created_at).toLocaleString()
+                ];
+
+                values.forEach(value => {
+                    const cell = row.insertCell();
+                    cell.textContent = value;
+                });
+            });
+
+            document.getElementById("action-panel").classList.add("hidden");
+            document.getElementById("history-panel").classList.remove("hidden");
+
+            addLog(`Loaded ${transactions.length} transactions.`);
+
+        } catch (error) {
+            addLog(`History request failed: ${error.message}`, "log-offline");
+        }
+    }
+
+    // ESP32 HARDWARE
+    async function connectHardware() {
+        const ip = document.getElementById("esp-ip").value.trim();
+
+        if (!ip) return;
+
+        try {
+            const response = await fetch(`${ip}/health`);
+            if (!response.ok) throw new Error("Hardware unavailable");
+
+            isHardwareConnected = true;
+
+            document.getElementById("hw-status").textContent =
+                "Connected";
+
+            document.getElementById("hw-status")
+                .classList.add("hardware-connected");
+
+            addLog("ESP32 hardware connected.", "log-hw");
+
+        } catch {
+            isHardwareConnected = false;
+
+            document.getElementById("hw-status").textContent =
+                "Connection failed - Check ESP32 API";
+
+            document.getElementById("hw-status")
+                .classList.remove("hardware-connected");
+
+            addLog("ESP32 connection failed.", "log-offline");
+        }
+    }
+
+    function simulateHardwareSensor(sensor) {
+        addLog(`Hardware sensor simulation: ${sensor}`, "log-hw");
+    }
+
+    // VOICE AI - Browser speech recognition demo
+    function startVoiceAI() {
+        const SpeechRecognition =
+            window.SpeechRecognition ||
+            window.webkitSpeechRecognition;
+
+        if (!SpeechRecognition) {
+            addLog(
+                "Speech recognition is not supported by this browser.",
+                "log-offline"
+            );
+            return;
+        }
+
+        const recognition = new SpeechRecognition();
+
+        recognition.lang = "en-US";
+        recognition.continuous = false;
+        recognition.interimResults = false;
+
+        recognition.onstart = () => {
+            addLog("Voice AI listening...", "log-ai");
+        };
+
+        recognition.onresult = event => {
+            const command = event.results[0][0].transcript;
+
+            addLog(`Voice command: ${command}`, "log-ai");
+
+            const normalized = command.toLowerCase();
+
+            if (normalized.includes("balance")) {
+                checkBalance();
+            } else if (
+                normalized.includes("statement") ||
+                normalized.includes("history")
+            ) {
+                getTransactions();
+            } else {
+                addLog(
+                    "Command recognized. This command is not connected yet.",
+                    "log-ai"
+                );
+            }
+        };
+
+        recognition.onerror = event => {
+            addLog(`Voice AI error: ${event.error}`, "log-offline");
+        };
+
+        recognition.start();
+    }
+
+    // INITIALIZATION
+    updateNetworkStatus();
+
+</script>
+
+</body>
+</html>
