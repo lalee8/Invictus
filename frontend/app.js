@@ -46,6 +46,7 @@ function showScreen(id) {
 }
 
 function speak(text) {
+  if (typeof queueBridgeReport === "function") queueBridgeReport(text);
   if (!SPEAK_ENABLED || !text || !("speechSynthesis" in window)) return;
   window.speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text);
@@ -365,7 +366,11 @@ async function login() {
     session.currency = acc.currency;
     pendingCard = "";
 
-    goMenu(true);
+    if (pendingService) {
+      runPendingService();   // e.g. card -> "balance" -> PIN  => open balance directly
+    } else {
+      goMenu(true);
+    }
   } catch (err) {
     entryValue = "";
     renderEntry();
@@ -382,6 +387,8 @@ async function login() {
 
 function logout() {
   Object.assign(session, { id: null, pin: null, card: "", name: "", currency: "AZN" });
+  pendingService = null;
+  pendingAmount = "";
   $("balance-amount").textContent = "0.00";
   $("history-list").innerHTML = "";
   goWelcome();
@@ -812,84 +819,232 @@ setInterval(updateClock, 10000);
 
 // =====================================================
 //  HARDWARE BRIDGE (ESP32 voice board)
-//  nodex_mcp_bridge.py runs on the same laptop and exposes
-//  GET http://localhost:5000/api/kiosk-state
-//  { screen, card_number, pin, amount }
-//  The site follows that state, but only reacts when a value CHANGES,
-//  so manual typing on the screen is never overwritten.
+//  nodex_mcp_bridge.py exposes:
+//    GET  /api/kiosk-state   { screen, card_number, pin, amount, version, changed }
+//    POST /api/kiosk-result  { version, text }  <- the site reports what really happened
+//  Every voice command has a new "version". The site handles each command once,
+//  in the order the robot asks: card number -> service -> PIN.
 // =====================================================
 
-const BRIDGE_URL = "http://localhost:5000/api/kiosk-state";
+// Where the bridge runs. If it is on ANOTHER computer, open the site once like this:
+//   http://127.0.0.1:8000/?bridge=192.168.1.25
+// The address is remembered in this browser. To go back: ?bridge=localhost
+function getBridgeBase() {
+  const fromLink = new URLSearchParams(location.search).get("bridge");
+  if (fromLink) {
+    try { localStorage.setItem("nodex-bridge", fromLink); } catch {}
+  }
+  let host = fromLink;
+  if (!host) {
+    try { host = localStorage.getItem("nodex-bridge"); } catch {}
+  }
+  host = (host || "localhost").replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+  if (!host.includes(":")) host += ":5000";
+  return `http://${host}`;
+}
+
+const BRIDGE_BASE = getBridgeBase();
+const BRIDGE_URL = BRIDGE_BASE + "/api/kiosk-state";
+const BRIDGE_RESULT_URL = BRIDGE_BASE + "/api/kiosk-result";
+console.log("Nodex bridge:", BRIDGE_URL);
+
 const BRIDGE_FAST = 300;    // ms between polls while the bridge is online
 const BRIDGE_SLOW = 3000;   // ms between polls while it is offline
+const REPORT_DELAY = 1000;  // wait for the last spoken message before reporting
 
-const bridge = { version: null, screen: null, card: null, pin: null, amount: null };
+let bridgeVersion = null;   // last handled command
+let reportVersion = null;   // command waiting for a result
+let reportText = "";
+let reportTimer = null;
 
-// bridge screen name -> what the site should do
-const BRIDGE_SCREENS = {
-  welcome: () => {
-    if (session.id) logout();
-    else goWelcome();
-  },
-  card_input: () => openEntry("card"),
-  main_menu: () => goMenu(),
-  balance: () => session.id && showBalance(),
-  history: () => session.id && showHistory(),
-  withdraw: () => session.id && openEntry("withdraw"),
-  deposit: () => session.id && openEntry("deposit"),
+// Service chosen BEFORE the PIN (robot order: card -> service -> PIN)
+let pendingService = null;  // "balance" | "history" | "withdraw" | "deposit" | "main_menu"
+let pendingAmount = "";
+
+const SERVICE_NAMES = {
+  balance: "Check balance",
+  history: "Transaction history",
+  withdraw: "Withdraw cash",
+  deposit: "Deposit money",
+  main_menu: "Main menu",
 };
 
-function applyBridgeState(state) {
-  // 0. New voice command (version changed): re-apply the fields it set,
-  //    even if the value is the same as before (e.g. the same PIN said twice)
-  if (state.version !== undefined && state.version !== bridge.version) {
-    const firstPoll = bridge.version === null;
-    bridge.version = state.version;
-    const changed = firstPoll ? [] : state.changed || [];
-    if (changed.includes("screen")) bridge.screen = null;
-    if (changed.includes("card_number")) bridge.card = null;
-    if (changed.includes("pin")) bridge.pin = null;
-    if (changed.includes("amount")) bridge.amount = null;
-  }
 
-  // 1. Screen change (only when the board sends a NEW screen)
-  if (state.screen && state.screen !== bridge.screen) {
-    bridge.screen = state.screen;
-    const action = BRIDGE_SCREENS[state.screen];
-    if (action) action();
+// ----- Reporting real results back to the robot -----
+
+function queueBridgeReport(text) {
+  if (reportVersion === null || !text) return;
+  reportText = text;                  // keep only the latest message
+  clearTimeout(reportTimer);
+  reportTimer = setTimeout(sendBridgeReport, REPORT_DELAY);
+}
+
+function sendBridgeReport() {
+  if (reportVersion === null) return;
+  const body = JSON.stringify({ version: reportVersion, text: reportText });
+  reportVersion = null;
+  fetch(BRIDGE_RESULT_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body,
+  }).catch(() => {});
+}
+
+
+// ----- Services -----
+
+function isAmountMode() {
+  return entryMode === "withdraw" || entryMode === "deposit";
+}
+
+function openService(service) {
+  if (service === "balance") return showBalance();
+  if (service === "history") return showHistory();
+  if (service === "withdraw" || service === "deposit") return openEntry(service);
+  goMenu();
+  speak("Main menu. You can withdraw, deposit, check balance or see history");
+}
+
+// Called right after a successful login
+function runPendingService() {
+  const service = pendingService;
+  const amount = pendingAmount;
+  pendingService = null;
+  pendingAmount = "";
+
+  goMenu(false);
+  openService(service);
+
+  // Amount was already said before the PIN: the PIN confirms it, so do it now
+  if (amount && (service === "withdraw" || service === "deposit")) {
+    entryValue = amount.slice(0, ENTRY[service].max);
+    renderEntry();
+    setTimeout(submitEntry, 400);
+  }
+}
+
+
+// ----- One voice command -----
+
+function handleVoiceCommand(cmd) {
+  const loggedIn = !!session.id;
+
+  // 1. Screen / service
+  if (cmd.screen) {
+    const screen = cmd.screen;
+
+    if (screen === "welcome") {
+      pendingService = null;
+      pendingAmount = "";
+      if (loggedIn) logout();
+      else {
+        goWelcome();
+        speak("Welcome to Nodex. Say your card number to start");
+      }
+      return;
+    }
+
+    if (screen === "card_input") {
+      pendingService = null;
+      pendingAmount = "";
+      if (loggedIn) logout();
+      openEntry("card");
+    } else if (loggedIn) {
+      openService(screen);
+    } else {
+      // Not logged in yet: remember the service, ask for what is missing
+      pendingService = screen;
+      if (entryMode === "pin") {
+        speak(`${SERVICE_NAMES[screen] || screen} selected. Please say your PIN`);
+      } else if (!cmd.card_number) {
+        openEntry("card");
+        speak(`${SERVICE_NAMES[screen] || screen} selected. Please say your card number first`);
+      }
+    }
   }
 
   // 2. Card number
-  const card = state.card_number ? String(state.card_number).replace(/\D/g, "") : "";
-  if (card && card !== bridge.card) {
-    bridge.card = card;
-    if (entryMode !== "card") openEntry("card");
-    entryValue = card.slice(0, CARD_LENGTH);
-    renderEntry();
-    if (entryValue.length === CARD_LENGTH) setTimeout(submitEntry, 300); // -> PIN step
+  if (cmd.card_number) {
+    const card = cmd.card_number.replace(/\D/g, "");
+    if (loggedIn) {
+      speak("You are already logged in");
+    } else if (card.length !== CARD_LENGTH) {
+      if (entryMode !== "card") openEntry("card");
+      entryValue = card.slice(0, CARD_LENGTH);
+      renderEntry();
+      entryError(`Card number must be ${CARD_LENGTH} digits. Please say it again`);
+    } else {
+      pendingCard = card;
+      openEntry("pin");
+      renderLiveCard();
+      if (!cmd.pin) {
+        speak(pendingService
+          ? `Card accepted. ${SERVICE_NAMES[pendingService]} selected. Please say your PIN`
+          : "Card accepted. Which service would you like: balance, withdraw, deposit or history?");
+      }
+    }
   }
 
-  // 3. PIN (shown only as dots)
-  const pin = state.pin ? String(state.pin).replace(/\D/g, "") : "";
-  if (pin && pin !== bridge.pin && entryMode === "pin") {
-    bridge.pin = pin;
-    entryValue = pin.slice(0, 4);
-    renderEntry();
-    if (entryValue.length === 4) setTimeout(submitEntry, 300); // -> login
+  // 3. Amount
+  if (cmd.amount) {
+    const amount = cmd.amount.replace(/\D/g, "");
+    if (!session.id) {
+      pendingAmount = amount;                       // used after the PIN
+    } else if (isAmountMode()) {
+      entryValue = amount.slice(0, ENTRY[entryMode].max);
+      renderEntry();
+      if (!cmd.pin && !cmd.confirm) {
+        speak(`${amount} ${session.currency}. Please say your PIN to confirm`);
+      }
+    }
   }
 
-  // 4. Amount (optional: if the bridge sends it on withdraw / deposit)
-  const amount = state.amount ? String(state.amount).replace(/\D/g, "") : "";
-  if (amount && amount !== bridge.amount && (entryMode === "withdraw" || entryMode === "deposit")) {
-    bridge.amount = amount;
-    entryValue = amount.slice(0, ENTRY[entryMode].max);
-    renderEntry();
+  // 4. PIN
+  if (cmd.pin) {
+    const pin = cmd.pin.replace(/\D/g, "").slice(0, 4);
+
+    if (!session.id) {
+      // Login
+      if (entryMode !== "pin") {
+        if (pendingCard) openEntry("pin");
+        else return speak("Please say your card number first");
+      }
+      entryValue = pin;
+      renderEntry();
+      submitEntry();                                 // -> login -> pending service
+    } else if (isAmountMode()) {
+      // PIN = confirmation of withdraw / deposit
+      if (!entryValue) return speak("Please say the amount first");
+      if (pin !== session.pin) return entryError("Wrong PIN. Please try again");
+      submitEntry();
+    } else if (!cmd.screen) {
+      speak("You are already logged in. Which service would you like?");
+    }
   }
 
-  // Reset remembered values when the board clears them
-  if (!card) bridge.card = null;
-  if (!pin) bridge.pin = null;
-  if (!amount) bridge.amount = null;
+  // 5. Explicit confirmation ("yes, confirm")
+  if (cmd.confirm && session.id && isAmountMode() && entryValue && !cmd.pin) {
+    submitEntry();
+  }
+}
+
+function applyBridgeState(state) {
+  if (state.version === undefined || state.version === bridgeVersion) return;
+
+  const firstPoll = bridgeVersion === null;
+  bridgeVersion = state.version;
+  if (firstPoll) return;              // don't replay an old command when the page opens
+
+  const changed = state.changed || [];
+  const cmd = {};
+  if (changed.includes("screen")) cmd.screen = state.screen;
+  if (changed.includes("card_number")) cmd.card_number = String(state.card_number || "");
+  if (changed.includes("pin")) cmd.pin = String(state.pin || "");
+  if (changed.includes("amount")) cmd.amount = String(state.amount || "");
+  if (changed.includes("confirm")) cmd.confirm = true;
+
+  reportVersion = state.version;      // the next spoken result goes back to the robot
+  handleVoiceCommand(cmd);
 }
 
 async function pollBridge() {
