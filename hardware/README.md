@@ -6,11 +6,9 @@ A pocket-sized, voice-controlled AI assistant built on the **ESP32-S3**. You spe
 
 ---
 
-## 📸 Phot
-| Front | Wiring | Demo |
-|---|---|---|
-| ![front](docs/images/front.jpg) | ![wiring](docs/images/wiring.jpg) | [▶ Video](https://youtu.be/your-video) |
+## 📸 Photo
 
+![alt text](image.png)
 ---
 
 ## ✨ Features
