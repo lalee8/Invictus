@@ -808,3 +808,102 @@ setInterval(checkHealth, 5000);
 
 updateClock();
 setInterval(updateClock, 10000);
+
+
+// =====================================================
+//  HARDWARE BRIDGE (ESP32 voice board)
+//  nodex_mcp_bridge.py runs on the same laptop and exposes
+//  GET http://localhost:5000/api/kiosk-state
+//  { screen, card_number, pin, amount }
+//  The site follows that state, but only reacts when a value CHANGES,
+//  so manual typing on the screen is never overwritten.
+// =====================================================
+
+const BRIDGE_URL = "http://localhost:5000/api/kiosk-state";
+const BRIDGE_FAST = 300;    // ms between polls while the bridge is online
+const BRIDGE_SLOW = 3000;   // ms between polls while it is offline
+
+const bridge = { version: null, screen: null, card: null, pin: null, amount: null };
+
+// bridge screen name -> what the site should do
+const BRIDGE_SCREENS = {
+  welcome: () => {
+    if (session.id) logout();
+    else goWelcome();
+  },
+  card_input: () => openEntry("card"),
+  main_menu: () => goMenu(),
+  balance: () => session.id && showBalance(),
+  history: () => session.id && showHistory(),
+  withdraw: () => session.id && openEntry("withdraw"),
+  deposit: () => session.id && openEntry("deposit"),
+};
+
+function applyBridgeState(state) {
+  // 0. New voice command (version changed): re-apply the fields it set,
+  //    even if the value is the same as before (e.g. the same PIN said twice)
+  if (state.version !== undefined && state.version !== bridge.version) {
+    const firstPoll = bridge.version === null;
+    bridge.version = state.version;
+    const changed = firstPoll ? [] : state.changed || [];
+    if (changed.includes("screen")) bridge.screen = null;
+    if (changed.includes("card_number")) bridge.card = null;
+    if (changed.includes("pin")) bridge.pin = null;
+    if (changed.includes("amount")) bridge.amount = null;
+  }
+
+  // 1. Screen change (only when the board sends a NEW screen)
+  if (state.screen && state.screen !== bridge.screen) {
+    bridge.screen = state.screen;
+    const action = BRIDGE_SCREENS[state.screen];
+    if (action) action();
+  }
+
+  // 2. Card number
+  const card = state.card_number ? String(state.card_number).replace(/\D/g, "") : "";
+  if (card && card !== bridge.card) {
+    bridge.card = card;
+    if (entryMode !== "card") openEntry("card");
+    entryValue = card.slice(0, CARD_LENGTH);
+    renderEntry();
+    if (entryValue.length === CARD_LENGTH) setTimeout(submitEntry, 300); // -> PIN step
+  }
+
+  // 3. PIN (shown only as dots)
+  const pin = state.pin ? String(state.pin).replace(/\D/g, "") : "";
+  if (pin && pin !== bridge.pin && entryMode === "pin") {
+    bridge.pin = pin;
+    entryValue = pin.slice(0, 4);
+    renderEntry();
+    if (entryValue.length === 4) setTimeout(submitEntry, 300); // -> login
+  }
+
+  // 4. Amount (optional: if the bridge sends it on withdraw / deposit)
+  const amount = state.amount ? String(state.amount).replace(/\D/g, "") : "";
+  if (amount && amount !== bridge.amount && (entryMode === "withdraw" || entryMode === "deposit")) {
+    bridge.amount = amount;
+    entryValue = amount.slice(0, ENTRY[entryMode].max);
+    renderEntry();
+  }
+
+  // Reset remembered values when the board clears them
+  if (!card) bridge.card = null;
+  if (!pin) bridge.pin = null;
+  if (!amount) bridge.amount = null;
+}
+
+async function pollBridge() {
+  let delay = BRIDGE_SLOW;
+  try {
+    const res = await fetch(BRIDGE_URL, { signal: AbortSignal.timeout(1500) });
+    if (res.ok) {
+      applyBridgeState(await res.json());
+      delay = BRIDGE_FAST;
+    }
+  } catch {
+    // bridge is not running: try again later
+  }
+  setTimeout(pollBridge, delay);
+}
+
+pollBridge();
