@@ -1,92 +1,68 @@
 // =====================================================
-//  ResiliNode AI — Frontend
-//  Modules: Bank (ATM), Hospital (queue), Doctor panel,
-//           ESP32 device, Voice commands
+//  Nodex ATM — Frontend
+//  Login with card number + PIN
+//  Screens: welcome, keypad entry (card / PIN / amount),
+//           menu, balance, result, history, register
 // =====================================================
 
-// ===== Settings and state =====
-const API = "http://127.0.0.1:8000";
+// ===== Settings =====
+// Online (same server) -> "" ; opened as a file or with Live Server -> local backend
+const API =
+  location.protocol === "file:" || location.port === "5500"
+    ? "http://127.0.0.1:8000"
+    : "";
 const LOCALE = "en-GB";
-const VOICE_LANG = "en-US";
+const SPEAK_ENABLED = true;      // set to false to turn off spoken feedback
+const RESULT_RETURN_SECONDS = 8;
+const CARD_LENGTH = 10;          // account_number in the backend has 10 digits
 
-let isOnline = false;        // is the backend reachable
+const SYMBOLS = { AZN: "₼", USD: "$", EUR: "€" };
 
-// Bank
-let currentId = null;        // logged-in account ID
-let currentPin = null;       // PIN (kept in memory only)
-let currentAction = null;    // "deposit" or "withdraw"
+// ===== State =====
+const session = {
+  id: null,          // account ID (used by the API)
+  pin: null,         // PIN (memory only)
+  card: "",          // card (account) number
+  name: "",
+  currency: "AZN",
+};
 
-// Hospital
-let currentTicket = null;    // { id, offline, announced }
-let lastTicketText = "";
+let entryMode = null;      // "card" | "pin" | "withdraw" | "deposit"
+let entryValue = "";
+let pendingCard = "";      // card number typed before the PIN step
+let resultTimer = null;
 
-// ESP32
-let deviceUrl = null;
-let deviceOnline = false;
-
-// Shortcut: find element by id
 const $ = (id) => document.getElementById(id);
-const isVisible = (id) => !$(id).classList.contains("hidden");
 
 
-// ===== Helpers =====
+// =====================================================
+//  HELPERS
+// =====================================================
 
-// Show only one screen
-function showScreen(screenId) {
-  document.querySelectorAll("main section").forEach((s) => s.classList.add("hidden"));
-  $(screenId).classList.remove("hidden");
-
-  // Screen-specific loading
-  if (screenId === "screen-doctor") loadQueue();
+function showScreen(id) {
+  document.querySelectorAll(".screen").forEach((s) => s.classList.add("hidden"));
+  $(id).classList.remove("hidden");
+  clearInterval(resultTimer);
 }
 
-// Show a message (green / red)
-function showMsg(elId, text, isError = false) {
-  const el = $(elId);
-  el.textContent = text;
-  el.className = "msg " + (isError ? "error" : "success");
-}
-
-// Read text aloud (for Digital Inclusion)
 function speak(text) {
-  if (!text || !("speechSynthesis" in window)) return;
+  if (!SPEAK_ENABLED || !text || !("speechSynthesis" in window)) return;
   window.speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text);
-  u.lang = VOICE_LANG;
+  u.lang = "en-US";
   window.speechSynthesis.speak(u);
 }
 
-// localStorage can fail in some contexts, so use try/catch
-function storageGet(key, fallback = null) {
-  try {
-    const v = localStorage.getItem(key);
-    return v === null ? fallback : JSON.parse(v);
-  } catch {
-    return fallback;
-  }
-}
-
-function storageSet(key, value) {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    // could not save, not a problem
-  }
-}
-
-// Friendlier versions of backend error messages
 const FRIENDLY_ERRORS = {
-  "Invalid PIN": "Wrong PIN",
-  "Account not found": "Account not found",
-  "Account is inactive": "This account is inactive",
+  "Invalid card number or PIN": "Wrong card number or PIN",
+  "Invalid PIN": "Wrong PIN. Please try again",
+  "Account not found": "Card not found",
+  "Account is inactive": "This card is blocked",
   "Insufficient funds": "Insufficient funds",
   "Unsupported currency": "This currency is not supported",
-  "Department not found": "Department not found",
-  "Ticket not found": "Ticket not found",
-  "Queue is empty": "No patients are waiting",
+  "Not Found": "Card login is not available. Update the backend",
 };
 
-// Send a request to the backend
 async function api(path, options = {}) {
   let res;
   try {
@@ -96,69 +72,548 @@ async function api(path, options = {}) {
       ...options,
     });
   } catch {
-    // Server is down or no network
-    const err = new Error("Could not connect to the server");
-    err.offline = true;
-    throw err;
+    throw new Error("Server is not reachable");
   }
 
   let data = null;
   try {
     data = await res.json();
   } catch {
-    // response is not JSON
+    // not JSON
   }
 
   if (!res.ok) {
     let message = "Something went wrong";
     if (data && data.detail) {
-      // 422 validation errors return an array
-      message = Array.isArray(data.detail)
-        ? data.detail.map((d) => d.msg).join(", ")
-        : data.detail;
+      message = Array.isArray(data.detail) ? data.detail.map((d) => d.msg).join(", ") : data.detail;
     }
     throw new Error(FRIENDLY_ERRORS[message] || message);
   }
-
   return data;
 }
 
-const isValidPin = (pin) => /^\d{4}$/.test(pin);
-
-// SQLite stores UTC but returns it without "Z". Parse it as UTC so local time is correct
+// SQLite returns UTC without "Z"
 function parseDate(value) {
   if (!value) return new Date();
   const hasZone = /[zZ]|[+-]\d{2}:?\d{2}$/.test(value);
   return new Date(hasZone ? value : value.replace(" ", "T") + "Z");
 }
 
+const money = (n, decimals = 2) =>
+  Number(n).toLocaleString(LOCALE, { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
 
-// ===== Backend status =====
-async function checkHealth() {
+const symbol = (cur = session.currency) => SYMBOLS[cur] || cur;
+
+// "0089258598" -> "0089 2585 98"
+const formatCard = (num) => String(num).replace(/(\d{4})(?=\d)/g, "$1 ");
+
+// "0089258598" -> "•••• •••• 98"
+const maskCard = (num) => (num ? "•••• •••• " + String(num).slice(-2) : "•••• •••• ••");
+
+const timeShort = (d = new Date()) => d.toLocaleTimeString(LOCALE, { hour: "2-digit", minute: "2-digit" });
+
+const txRef = (id) => "TX-" + String(id).padStart(6, "0");
+
+function greeting() {
+  const h = new Date().getHours();
+  if (h < 12) return "Good morning";
+  if (h < 18) return "Good afternoon";
+  return "Good evening";
+}
+
+// 35000 -> "Thirty Five Thousand"
+function numberToWords(num) {
+  num = Math.floor(Number(num));
+  if (num === 0) return "Zero";
+  const ones = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten",
+    "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"];
+  const tens = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
+
+  function under1000(n) {
+    const out = [];
+    if (n >= 100) {
+      out.push(ones[Math.floor(n / 100)], "Hundred");
+      n %= 100;
+    }
+    if (n >= 20) {
+      out.push(tens[Math.floor(n / 10)]);
+      n %= 10;
+    }
+    if (n > 0) out.push(ones[n]);
+    return out.join(" ");
+  }
+
+  const parts = [];
+  for (const [value, name] of [[1e9, "Billion"], [1e6, "Million"], [1e3, "Thousand"]]) {
+    if (num >= value) {
+      parts.push(under1000(Math.floor(num / value)), name);
+      num %= value;
+    }
+  }
+  if (num > 0) parts.push(under1000(num));
+  return parts.join(" ");
+}
+
+async function withBusy(button, task) {
+  if (button.disabled) return;
+  button.disabled = true;
   try {
-    await api("/health");
-    isOnline = true;
-    $("status-dot").className = "online";
-    $("status-text").textContent = "Server: online";
-  } catch {
-    isOnline = false;
-    $("status-dot").className = "offline";
-    $("status-text").textContent = "Server: offline";
+    await task();
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function restartAnimation(el, cls) {
+  el.classList.remove(cls);
+  void el.offsetWidth;
+  el.classList.add(cls);
+}
+
+
+// =====================================================
+//  KEYPAD ENTRY (card number, PIN, amount)
+// =====================================================
+
+const ICONS = {
+  withdraw: `<svg viewBox="0 0 24 24" class="ico-lg"><rect x="3" y="9" width="18" height="11" rx="1.5"/><circle cx="12" cy="14.5" r="2.5"/><path d="M9 6l3-3 3 3M12 3v5"/></svg>`,
+  deposit: `<svg viewBox="0 0 24 24" class="ico-lg"><rect x="3" y="9" width="18" height="11" rx="1.5"/><circle cx="12" cy="14.5" r="2.5"/><path d="M9 4l3 3 3-3M12 7V2"/></svg>`,
+};
+
+const ENTRY = {
+  card: {
+    title: "Enter your card number",
+    sub: `${CARD_LENGTH} digits, printed on your card`,
+    button: "Continue",
+    max: CARD_LENGTH,
+    voice: "Please enter your card number",
+  },
+  pin: {
+    title: "Enter your PIN to continue",
+    sub: "Your PIN is never shown on screen",
+    button: "Confirm",
+    max: 4,
+    voice: "Please enter your PIN",
+  },
+  withdraw: {
+    title: "Withdraw Cash",
+    sub: "Enter the amount you want to withdraw",
+    button: "Withdraw",
+    max: 7,
+    voice: "Enter the amount you want to withdraw",
+  },
+  deposit: {
+    title: "Deposit Money",
+    sub: "Enter the amount you want to deposit",
+    button: "Deposit",
+    max: 7,
+    voice: "Enter the amount you want to deposit",
+  },
+};
+
+function openEntry(mode) {
+  entryMode = mode;
+  entryValue = "";
+  const cfg = ENTRY[mode];
+  const isLogin = mode === "card" || mode === "pin";
+  const isAmount = !isLogin;
+
+  const panel = document.querySelector(".entry-panel");
+  panel.classList.toggle("plain", isLogin);
+  $("live-card").classList.toggle("hidden", !isLogin);
+  $("steps").classList.toggle("hidden", !isLogin);
+  $("entry-icon").innerHTML = ICONS[mode] || "";
+  $("entry-title").textContent = cfg.title;
+  $("entry-sub").textContent = cfg.sub;
+  $("btn-entry-submit").textContent = cfg.button;
+  $("quick-amounts").classList.toggle("hidden", !isAmount);
+  $("entry-display").classList.toggle("left", isAmount);
+  $("entry-display").classList.remove("shake");
+  $("entry-msg").textContent = "";
+
+  // Step indicator: Card -> PIN -> Menu
+  document.querySelectorAll("#steps li").forEach((li) => {
+    const order = ["card", "pin", "menu"];
+    const i = order.indexOf(li.dataset.step);
+    const current = order.indexOf(mode);
+    li.className = i < current ? "done" : i === current ? "active" : "";
+  });
+
+  renderEntry();
+  showScreen("screen-entry");
+  speak(cfg.voice);
+}
+
+// Live card preview: typed digits appear on the card
+function renderLiveCard() {
+  const source = entryMode === "card" ? entryValue : pendingCard;
+  let html = "";
+  for (let i = 0; i < CARD_LENGTH; i++) {
+    if (i > 0 && i % 4 === 0) html += " ";
+    if (entryMode === "pin" && i < CARD_LENGTH - 2) {
+      html += `<span class="typed">•</span>`; // hide most digits on the PIN step
+    } else if (i < source.length) {
+      html += `<span class="typed">${source[i]}</span>`;
+    } else {
+      html += `<span class="empty">•</span>`;
+    }
+  }
+  $("live-number").innerHTML = html;
+  $("live-holder").textContent = entryMode === "pin" ? "ENTER PIN" : "CARD HOLDER";
+}
+
+function renderEntry() {
+  const d = $("entry-display");
+  $("entry-words").textContent = "";
+
+  if (entryMode === "card" || entryMode === "pin") renderLiveCard();
+
+  if (entryMode === "pin") {
+    d.innerHTML =
+      `<span class="pin-dots">` +
+      [0, 1, 2, 3].map((i) => `<span class="${i < entryValue.length ? "on" : ""}"></span>`).join("") +
+      `</span>`;
+    return;
+  }
+
+  if (entryMode === "card") {
+    d.innerHTML = entryValue
+      ? formatCard(entryValue)
+      : `<span class="ph">0000 0000 00</span>`;
+    return;
+  }
+
+  // amount
+  if (entryValue) {
+    d.textContent = `${symbol()} ${money(entryValue, 0)}`;
+    $("entry-words").textContent = `${numberToWords(entryValue)} ${session.currency} only`;
+  } else {
+    d.innerHTML = `${symbol()} <span class="ph">0</span>`;
+  }
+}
+
+function pressKey(key) {
+  if (!entryMode) return;
+  $("entry-msg").textContent = "";
+
+  if (key === "back") {
+    entryValue = entryValue.slice(0, -1);
+  } else if (entryValue.length < ENTRY[entryMode].max) {
+    const isAmount = entryMode === "withdraw" || entryMode === "deposit";
+    if (isAmount && entryValue === "" && key === "0") return; // no leading zero in amounts
+    entryValue += key;
+    if (entryMode === "card") restartAnimation($("live-card"), "bump");
+  }
+  renderEntry();
+
+  // Auto-continue when the card number or PIN is complete
+  if (entryMode === "pin" && entryValue.length === 4) setTimeout(submitEntry, 150);
+  if (entryMode === "card" && entryValue.length === CARD_LENGTH) setTimeout(submitEntry, 250);
+}
+
+function entryError(text) {
+  $("entry-msg").textContent = text;
+  restartAnimation($("entry-display"), "shake");
+  speak(text);
+}
+
+async function submitEntry() {
+  const btn = $("btn-entry-submit");
+  if (btn.disabled || !entryMode) return;
+
+  if (entryMode === "card") {
+    if (entryValue.length !== CARD_LENGTH) return entryError(`Card number must be ${CARD_LENGTH} digits`);
+    pendingCard = entryValue;
+    return openEntry("pin");
+  }
+
+  if (entryMode === "pin") {
+    if (entryValue.length !== 4) return entryError("PIN must be 4 digits");
+    return withBusy(btn, login);
+  }
+
+  if (!entryValue || Number(entryValue) <= 0) return entryError("Please enter an amount");
+  return withBusy(btn, makeTransaction);
+}
+
+function cancelEntry() {
+  if (entryMode === "card" || entryMode === "pin") {
+    pendingCard = "";
+    goWelcome();
+  } else {
+    goMenu();
   }
 }
 
 
 // =====================================================
-//  BANK
+//  LOGIN / LOGOUT
 // =====================================================
+
+async function login() {
+  const pin = entryValue;
+  try {
+    const acc = await api("/accounts/login", {
+      method: "POST",
+      body: JSON.stringify({ account_number: pendingCard, pin }),
+    });
+
+    session.id = acc.id;
+    session.pin = pin;
+    session.card = acc.account_number;
+    session.name = acc.owner_name;
+    session.currency = acc.currency;
+    pendingCard = "";
+
+    goMenu(true);
+  } catch (err) {
+    entryValue = "";
+    renderEntry();
+    entryError(err.message);
+
+    // Wrong card or PIN: start again from the card number after a moment
+    if (err.message === "Wrong card number or PIN") {
+      setTimeout(() => {
+        if (entryMode === "pin") openEntry("card");
+      }, 1600);
+    }
+  }
+}
+
+function logout() {
+  Object.assign(session, { id: null, pin: null, card: "", name: "", currency: "AZN" });
+  $("balance-amount").textContent = "0.00";
+  $("history-list").innerHTML = "";
+  goWelcome();
+  speak("Thank you for using Nodex. Goodbye");
+}
+
+function goWelcome() {
+  entryMode = null;
+  showScreen("screen-welcome");
+}
+
+function goMenu(firstTime = false) {
+  if (!session.id) return goWelcome();
+  entryMode = null;
+
+  const firstName = (session.name || "").split(" ")[0];
+  $("menu-greeting").textContent = greeting();
+  $("menu-name").textContent = firstName ? `Welcome, ${firstName}` : "Welcome";
+  $("menu-card").textContent = maskCard(session.card);
+
+  showScreen("screen-menu");
+  if (firstTime) speak(`${greeting()} ${firstName}. Please choose an operation`);
+}
+
+
+// =====================================================
+//  TRANSACTIONS
+// =====================================================
+
+async function makeTransaction() {
+  const action = entryMode;
+  const amount = Number(entryValue);
+
+  try {
+    const tx = await api(`/accounts/${session.id}/${action}`, {
+      method: "POST",
+      body: JSON.stringify({ pin: session.pin, amount }),
+    });
+    showResult(tx);
+  } catch (err) {
+    entryError(err.message);
+  }
+}
+
+// Receipt shows only the transaction, never the balance
+function showResult(tx) {
+  const isDeposit = tx.transaction_type === "DEPOSIT";
+
+  $("result-title").textContent = isDeposit ? "Deposit successful" : "Withdrawal successful";
+  $("result-amount").textContent = `${symbol(tx.currency)} ${money(tx.amount)}`;
+  $("result-note").textContent = isDeposit ? "The money has been added to your account" : "Please take your cash";
+  $("result-card").textContent = maskCard(session.card);
+  $("result-ref").textContent = txRef(tx.id);
+  $("result-time").textContent = parseDate(tx.created_at).toLocaleString(LOCALE, { dateStyle: "short", timeStyle: "short" });
+
+  entryMode = null;
+  showScreen("screen-result");
+  speak(isDeposit
+    ? `${tx.amount} ${tx.currency} deposited successfully`
+    : `${tx.amount} ${tx.currency} withdrawn. Please take your cash`);
+
+  // Back to the menu automatically
+  let left = RESULT_RETURN_SECONDS;
+  $("result-countdown").textContent = `(${left})`;
+  resultTimer = setInterval(() => {
+    left -= 1;
+    $("result-countdown").textContent = `(${left})`;
+    if (left <= 0) goMenu();
+  }, 1000);
+}
+
+
+// =====================================================
+//  BALANCE (only when requested)
+// =====================================================
+
+async function showBalance() {
+  try {
+    const data = await api(`/accounts/${session.id}/balance?pin=${encodeURIComponent(session.pin)}`);
+    session.currency = data.currency;
+
+    $("balance-card-number").textContent = formatCard(data.account_number);
+    $("balance-holder").textContent = session.name || "CARD HOLDER";
+    $("balance-symbol").textContent = symbol();
+    $("balance-words").textContent = `${numberToWords(data.balance)} ${data.currency}`;
+    $("balance-currency").textContent = data.currency;
+    $("balance-time").textContent = timeShort();
+
+    showScreen("screen-balance");
+    countUp($("balance-amount"), Number(data.balance));
+    speak(`Your available balance is ${data.balance} ${data.currency}`);
+  } catch (err) {
+    menuError(err.message);
+  }
+}
+
+function countUp(el, target) {
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    el.textContent = money(target);
+    return;
+  }
+  const start = performance.now();
+  const duration = 800;
+  function step(now) {
+    const t = Math.min((now - start) / duration, 1);
+    el.textContent = money(target * (1 - Math.pow(1 - t, 3)));
+    if (t < 1) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+}
+
+function menuError(text) {
+  speak(text);
+  const g = $("menu-greeting");
+  g.textContent = "⚠ " + text;
+  g.style.color = "var(--red)";
+  setTimeout(() => {
+    g.textContent = greeting();
+    g.style.color = "";
+  }, 2500);
+}
+
+
+// =====================================================
+//  HISTORY (timeline grouped by day)
+// =====================================================
+
+const TX_ICONS = {
+  in: `<svg viewBox="0 0 24 24" class="ico"><path d="M12 5v14M5 12l7 7 7-7"/></svg>`,
+  out: `<svg viewBox="0 0 24 24" class="ico"><path d="M12 19V5M5 12l7-7 7 7"/></svg>`,
+};
+
+function dayLabel(date) {
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+  if (date.toDateString() === today.toDateString()) return "Today";
+  if (date.toDateString() === yesterday.toDateString()) return "Yesterday";
+  return date.toLocaleDateString(LOCALE, { day: "numeric", month: "long", year: "numeric" });
+}
+
+async function showHistory() {
+  try {
+    const list = await api(`/accounts/${session.id}/transactions?pin=${encodeURIComponent(session.pin)}`);
+    const box = $("history-list");
+    box.innerHTML = "";
+
+    // Summary line
+    let totalIn = 0;
+    let totalOut = 0;
+    list.forEach((t) => (t.transaction_type === "DEPOSIT" ? (totalIn += Number(t.amount)) : (totalOut += Number(t.amount))));
+    $("history-summary").textContent = list.length
+      ? `${list.length} transactions · In ${symbol()} ${money(totalIn)} · Out ${symbol()} ${money(totalOut)}`
+      : "No transactions yet";
+
+    if (list.length === 0) {
+      box.innerHTML = `<p class="tx-empty">Your transactions will appear here</p>`;
+    }
+
+    // Group by day
+    let currentDay = null;
+    let dayBox = null;
+
+    list.forEach((t) => {
+      const date = parseDate(t.created_at);
+      const label = dayLabel(date);
+
+      if (label !== currentDay) {
+        currentDay = label;
+        dayBox = document.createElement("div");
+        dayBox.className = "day";
+        dayBox.innerHTML = `<p class="day-label">${label}</p>`;
+        box.appendChild(dayBox);
+      }
+
+      const isIn = t.transaction_type === "DEPOSIT";
+      const sym = symbol(t.currency);
+      const row = document.createElement("div");
+      row.className = "tx";
+      row.innerHTML = `
+        <span class="tx-ico ${isIn ? "in" : "out"}">${isIn ? TX_ICONS.in : TX_ICONS.out}</span>
+        <div class="tx-card" style="grid-column: span 2">
+          <div class="tx-top">
+            <span class="tx-title">${isIn ? "Deposit" : "Withdrawal"}</span>
+            <span class="tx-amount ${isIn ? "in" : "out"}">${isIn ? "+" : "−"}${sym} ${money(t.amount)}</span>
+          </div>
+          <div class="tx-top">
+            <span class="tx-date">${timeShort(date)} · ${txRef(t.id)}</span>
+            <span class="tx-after">Balance ${sym} ${money(t.balance_after)}</span>
+          </div>
+        </div>
+      `;
+      dayBox.appendChild(row);
+    });
+
+    showScreen("screen-history");
+    speak(`${list.length} transactions found`);
+  } catch (err) {
+    menuError(err.message);
+  }
+}
+
+
+// =====================================================
+//  REGISTER
+// =====================================================
+
+let newCardNumber = "";
+
+function openRegister() {
+  $("reg-name").value = "";
+  $("reg-pin").value = "";
+  $("reg-msg").textContent = "";
+  $("new-card").classList.remove("ready");
+  $("new-card-number").textContent = "•••• •••• ••";
+  $("new-card-holder").textContent = "YOUR NAME";
+  $("new-card-note").textContent = "Your card preview";
+  $("btn-use-card").classList.add("hidden");
+  newCardNumber = "";
+  showScreen("screen-register");
+  $("reg-name").focus();
+}
 
 async function register() {
   const owner_name = $("reg-name").value.trim();
   const pin = $("reg-pin").value;
-  const currency = $("reg-currency").value;
+  const currency = document.querySelector("#reg-currency .active").dataset.value;
+  const msg = $("reg-msg");
+  msg.className = "entry-msg";
 
-  if (owner_name.length < 2) return showMsg("reg-msg", "Please enter a valid name", true);
-  if (!isValidPin(pin)) return showMsg("reg-msg", "PIN must be 4 digits", true);
+  if (owner_name.length < 2) return (msg.textContent = "Please enter your full name");
+  if (!/^\d{4}$/.test(pin)) return (msg.textContent = "PIN must be 4 digits");
 
   try {
     const acc = await api("/accounts/", {
@@ -166,659 +621,190 @@ async function register() {
       body: JSON.stringify({ owner_name, pin, currency }),
     });
 
-    showMsg("reg-msg", `Account created! Your ID: ${acc.id}`);
-    speak(`Your account has been created. Your ID number is ${acc.id}`);
+    newCardNumber = acc.account_number;
+    msg.className = "entry-msg ok";
+    msg.textContent = "Account created!";
 
-    // Pre-fill the login form
-    $("login-id").value = acc.id;
+    $("new-card-number").textContent = formatCard(acc.account_number);
+    $("new-card").classList.add("ready");
+    $("new-card-note").innerHTML = `Your card number: <strong>${formatCard(acc.account_number)}</strong><br>Please write it down.`;
+    $("btn-use-card").classList.remove("hidden");
+
     $("reg-name").value = "";
     $("reg-pin").value = "";
+
+    speak(`Your account has been created. Your card number is ${acc.account_number.split("").join(" ")}`);
   } catch (err) {
-    showMsg("reg-msg", err.message, true);
+    msg.textContent = err.message;
   }
 }
 
-async function login() {
-  const id = $("login-id").value;
-  const pin = $("login-pin").value;
-
-  if (!id) return showMsg("login-msg", "Please enter your account ID", true);
-  if (!isValidPin(pin)) return showMsg("login-msg", "PIN must be 4 digits", true);
-
-  try {
-    // There is no separate login endpoint, so we verify with the balance request
-    const data = await api(`/accounts/${id}/balance?pin=${encodeURIComponent(pin)}`);
-
-    currentId = Number(id);
-    currentPin = pin;
-
-    $("dash-number").textContent = data.account_number;
-    $("dash-balance").textContent = `${data.balance} ${data.currency}`;
-    $("login-pin").value = "";
-    showMsg("login-msg", "");
-    showMsg("dash-msg", "");
-
-    showScreen("screen-dashboard");
-    speak("Welcome");
-    notifyDevice("login", "Bank login");
-  } catch (err) {
-    showMsg("login-msg", err.message, true);
-    speak(err.message);
-    notifyDevice("error", err.message);
+// Live preview of the name on the new card
+$("reg-name").addEventListener("input", (e) => {
+  if (!$("new-card").classList.contains("ready")) {
+    $("new-card-holder").textContent = e.target.value.trim() || "YOUR NAME";
   }
-}
+});
 
-function logout() {
-  currentId = null;
-  currentPin = null;
-  currentAction = null;
-  closeAmountPanel();
-  showScreen("screen-home");
-  speak("Thank you, goodbye");
-}
-
-function openAmountPanel(action) {
-  currentAction = action;
-  $("amount-panel").classList.remove("hidden");
-  $("amount").value = "";
-  $("amount").focus();
-  const text = action === "deposit" ? "Enter the amount to deposit" : "Enter the amount to withdraw";
-  showMsg("dash-msg", text);
-  speak(text);
-}
-
-function closeAmountPanel() {
-  $("amount-panel").classList.add("hidden");
-  currentAction = null;
-}
-
-async function confirmTransaction() {
-  const amount = Number($("amount").value);
-  if (!amount || amount <= 0) return showMsg("dash-msg", "Please enter a valid amount", true);
-
-  try {
-    const tx = await api(`/accounts/${currentId}/${currentAction}`, {
-      method: "POST",
-      body: JSON.stringify({ pin: currentPin, amount }),
-    });
-
-    $("dash-balance").textContent = `${tx.balance_after} ${tx.currency}`;
-    const verb = currentAction === "deposit" ? "deposited" : "withdrawn";
-    const text = `${amount} ${tx.currency} ${verb}. New balance: ${tx.balance_after}`;
-    showMsg("dash-msg", text);
-    speak(text);
-    notifyDevice(currentAction, `${amount} ${tx.currency}`);
-    closeAmountPanel();
-  } catch (err) {
-    showMsg("dash-msg", err.message, true);
-    speak(err.message);
-    notifyDevice("error", err.message);
-  }
-}
-
-async function refreshBalance() {
-  try {
-    const data = await api(`/accounts/${currentId}/balance?pin=${encodeURIComponent(currentPin)}`);
-    $("dash-balance").textContent = `${data.balance} ${data.currency}`;
-    const text = `Your balance is ${data.balance} ${data.currency}`;
-    showMsg("dash-msg", text);
-    speak(text);
-  } catch (err) {
-    showMsg("dash-msg", err.message, true);
-  }
-}
-
-async function loadHistory() {
-  try {
-    const list = await api(`/accounts/${currentId}/transactions?pin=${encodeURIComponent(currentPin)}`);
-    const body = $("history-body");
-    body.innerHTML = "";
-
-    if (list.length === 0) {
-      body.innerHTML = `<tr><td colspan="4">No transactions yet</td></tr>`;
-    }
-
-    list.forEach((t) => {
-      const isDeposit = t.transaction_type === "DEPOSIT";
-      const row = document.createElement("tr");
-      row.innerHTML = `
-        <td>${parseDate(t.created_at).toLocaleString(LOCALE)}</td>
-        <td class="${isDeposit ? "type-deposit" : "type-withdraw"}">${isDeposit ? "Deposit" : "Withdraw"}</td>
-        <td>${isDeposit ? "+" : "-"}${t.amount} ${t.currency}</td>
-        <td>${t.balance_after}</td>
-      `;
-      body.appendChild(row);
-    });
-
-    showScreen("screen-history");
-    speak(`${list.length} transactions found`);
-  } catch (err) {
-    showMsg("dash-msg", err.message, true);
-  }
-}
+// Go straight to login with the new card number
+$("btn-use-card").addEventListener("click", () => {
+  pendingCard = newCardNumber;
+  openEntry("pin");
+});
 
 
 // =====================================================
-//  HOSPITAL
-//  Uses the backend when the server is online;
-//  creates the ticket in the browser when offline.
+//  SERVER STATUS + CLOCK
 // =====================================================
 
-const DEPARTMENTS = {
-  general:    { name: "General Practice", prefix: "G", minutes: 10 },
-  cardiology: { name: "Cardiology",       prefix: "C", minutes: 15 },
-  pediatrics: { name: "Pediatrics",       prefix: "P", minutes: 12 },
-  dentistry:  { name: "Dentistry",        prefix: "D", minutes: 20 },
-};
-
-const STATUS_TEXT = {
-  WAITING: "Waiting",
-  CALLED: "📢 It's your turn! Please go to the doctor's room",
-  DONE: "Visit completed",
-};
-
-function openHospital() {
-  showMsg("hospital-msg", "");
-  showScreen("screen-hospital");
-  speak("Hospital. Type your name and choose a department: general practice, cardiology, pediatrics, or dentistry");
-}
-
-// Offline ticket: number is stored in the browser (resets daily)
-function createOfflineTicket(name, deptKey) {
-  const dept = DEPARTMENTS[deptKey];
-  const today = new Date().toDateString();
-  let queues = storageGet("resilinode-queues", {});
-  if (queues.date !== today) queues = { date: today, counts: {} };
-
-  const number = (queues.counts[deptKey] || 0) + 1;
-  queues.counts[deptKey] = number;
-  storageSet("resilinode-queues", queues);
-
-  // In offline mode we don't know the real queue, so we estimate
-  const ahead = Math.min(number - 1, 4);
-
-  return {
-    id: null,
-    code: `OFF-${dept.prefix}${String(number).padStart(3, "0")}`,
-    department: deptKey,
-    department_name: dept.name,
-    patient_name: name,
-    status: "WAITING",
-    ahead,
-    estimated_wait: ahead * dept.minutes,
-    created_at: new Date().toISOString(),
-  };
-}
-
-function renderTicket(t, offline) {
-  $("ticket-offline").classList.toggle("hidden", !offline);
-  $("ticket-dept").textContent = t.department_name;
-  $("ticket-number").textContent = t.code;
-  $("ticket-name").textContent = t.patient_name;
-  $("ticket-ahead").textContent = t.ahead;
-  $("ticket-wait").textContent = t.estimated_wait;
-  $("ticket-time").textContent = parseDate(t.created_at).toLocaleString(LOCALE);
-  $("ticket-status").textContent = STATUS_TEXT[t.status] || t.status;
-  $("ticket-status").classList.toggle("called", t.status === "CALLED");
-  $("btn-ticket-refresh").classList.toggle("hidden", offline);
-}
-
-async function takeTicket(deptKey) {
-  const name = $("patient-name").value.trim();
-
-  if (name.length < 2) {
-    showMsg("hospital-msg", "Please type your name first", true);
-    speak("Please type your name first");
-    $("patient-name").focus();
-    return;
-  }
-
-  let ticket;
-  let offline = false;
-
+async function checkHealth() {
   try {
-    ticket = await api("/hospital/tickets", {
-      method: "POST",
-      body: JSON.stringify({ patient_name: name, department: deptKey }),
-    });
-  } catch (err) {
-    if (!err.offline) {
-      showMsg("hospital-msg", err.message, true);
-      return speak(err.message);
-    }
-    // No server: offline ticket
-    ticket = createOfflineTicket(name, deptKey);
-    offline = true;
-  }
-
-  currentTicket = { id: ticket.id, offline, announced: false };
-  renderTicket(ticket, offline);
-
-  const spokenCode = ticket.code.replace("OFF-", "").replace("-", " ");
-  lastTicketText =
-    `${name}, your ticket number is ${spokenCode}. ` +
-    `Department: ${ticket.department_name}. There are ${ticket.ahead} people ahead of you. ` +
-    `Estimated wait is ${ticket.estimated_wait} minutes.` +
-    (offline ? " Note: the system is in offline mode, please confirm your ticket at the front desk." : "");
-
-  showScreen("screen-ticket");
-  speak(lastTicketText);
-  notifyDevice("ticket", ticket.code);
-}
-
-// Refresh the ticket status from the server
-async function refreshTicket(silent = false) {
-  if (!currentTicket || currentTicket.offline) return;
-
-  try {
-    const t = await api(`/hospital/tickets/${currentTicket.id}`);
-    renderTicket(t, false);
-
-    if (t.status === "CALLED" && !currentTicket.announced) {
-      currentTicket.announced = true;
-      speak(`${t.patient_name}, it's your turn. Please go to the ${t.department_name} room.`);
-    } else if (!silent) {
-      speak(`There are ${t.ahead} people ahead of you`);
-    }
-  } catch (err) {
-    if (!silent) speak(err.message);
-  }
-}
-
-function finishHospital() {
-  $("patient-name").value = "";
-  lastTicketText = "";
-  currentTicket = null;
-  showScreen("screen-home");
-}
-
-
-// =====================================================
-//  DOCTOR PANEL
-// =====================================================
-
-async function loadQueue() {
-  const dept = $("doctor-dept").value;
-
-  try {
-    const q = await api(`/hospital/queue/${dept}`);
-
-    $("doctor-current").textContent = q.current ? q.current.code : "—";
-    $("doctor-current-name").textContent = q.current ? q.current.patient_name : "";
-    $("doctor-count").textContent = q.waiting.length;
-
-    const list = $("doctor-waiting");
-    list.innerHTML = "";
-
-    if (q.waiting.length === 0) {
-      list.innerHTML = `<li>No patients waiting</li>`;
-    }
-
-    q.waiting.forEach((t) => {
-      const li = document.createElement("li");
-      const time = parseDate(t.created_at).toLocaleTimeString(LOCALE, { hour: "2-digit", minute: "2-digit" });
-      li.innerHTML = `<span><strong>${t.code}</strong> — </span><span>${time}</span>`;
-      // Add the name with a text node (safer than innerHTML)
-      li.firstChild.appendChild(document.createTextNode(t.patient_name));
-      list.appendChild(li);
-    });
-
-    showMsg("doctor-msg", "");
-  } catch (err) {
-    showMsg("doctor-msg", err.offline ? "The doctor panel needs the server" : err.message, true);
-  }
-}
-
-async function callNext() {
-  const dept = $("doctor-dept").value;
-
-  try {
-    const t = await api(`/hospital/queue/${dept}/next`, { method: "POST" });
-    const spokenCode = t.code.replace("-", " ");
-    const text = `Ticket ${spokenCode}, ${t.patient_name}, please go to the ${t.department_name} room`;
-    speak(text);
-    showMsg("doctor-msg", `Called: ${t.code}`);
-    notifyDevice("call", t.code);
-    loadQueue();
-  } catch (err) {
-    showMsg("doctor-msg", err.message, true);
-    speak(err.message);
-    loadQueue();
-  }
-}
-
-
-// =====================================================
-//  ESP32 DEVICE
-//  Firmware: esp32/resilinode_node/resilinode_node.ino
-//  GET /status  -> device info (JSON)
-//  GET /notify?event=...&msg=...  -> LED / buzzer signal
-// =====================================================
-
-function normalizeUrl(raw) {
-  let url = raw.trim();
-  if (!url) return null;
-  if (!/^https?:\/\//i.test(url)) url = "http://" + url;
-  return url.replace(/\/+$/, "");
-}
-
-function setDeviceStatus(online, text) {
-  deviceOnline = online;
-  $("device-dot").className = deviceUrl ? (online ? "online" : "offline") : "";
-  $("device-text").textContent = text;
-}
-
-async function pingDevice() {
-  if (!deviceUrl) {
-    setDeviceStatus(false, "ESP32: not connected");
-    return null;
-  }
-
-  try {
-    const res = await fetch(deviceUrl + "/status", { signal: AbortSignal.timeout(3000) });
-    const info = await res.json();
-    setDeviceStatus(true, "ESP32: online");
-    $("device-info").textContent =
-      `Device:  ${info.device || "-"}\n` +
-      `IP:      ${info.ip || "-"}\n` +
-      `WiFi:    ${info.rssi ?? "-"} dBm\n` +
-      `Uptime:  ${info.uptime ?? "-"} s\n` +
-      `Signals: ${info.notifications ?? 0}`;
-    return info;
+    await api("/health");
+    $("status-dot").className = "dot online";
+    $("status-text").textContent = "Online";
   } catch {
-    setDeviceStatus(false, "ESP32: unreachable");
-    $("device-info").textContent = "Could not connect to the device";
-    return null;
+    $("status-dot").className = "dot offline";
+    $("status-text").textContent = "Offline";
   }
 }
 
-async function connectDevice() {
-  const url = normalizeUrl($("device-ip").value);
-  if (!url) return showMsg("device-msg", "Please enter the device address", true);
-
-  deviceUrl = url;
-  $("device-ip").value = url;
-  showMsg("device-msg", "Connecting...");
-
-  const info = await pingDevice();
-  if (info) {
-    storageSet("resilinode-device", url);
-    showMsg("device-msg", "ESP32 connected");
-    speak("Device connected");
-    notifyDevice("test", "Connected");
-  } else {
-    showMsg("device-msg", "Could not connect. Check the IP, WiFi and firmware", true);
-  }
-}
-
-function disconnectDevice() {
-  deviceUrl = null;
-  storageSet("resilinode-device", null);
-  setDeviceStatus(false, "ESP32: not connected");
-  $("device-info").textContent = "No data";
-  showMsg("device-msg", "Device disconnected");
-}
-
-// Send an event to the device (we don't read the reply, so "no-cors")
-function notifyDevice(event, msg = "") {
-  if (!deviceUrl || !deviceOnline) return;
-  const url = `${deviceUrl}/notify?event=${encodeURIComponent(event)}&msg=${encodeURIComponent(msg)}`;
-  fetch(url, { mode: "no-cors", signal: AbortSignal.timeout(3000) }).catch(() => {});
+function updateClock() {
+  $("clock").textContent = timeShort();
 }
 
 
 // =====================================================
-//  VOICE COMMANDS
+//  HELP
 // =====================================================
-const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-let recognition = null;
-let isListening = false;
 
-function setVoiceText(text) {
-  $("voice-text").textContent = text;
+function openHelp() {
+  $("help-modal").classList.remove("hidden");
+  $("btn-help-close").focus();
+  speak("Tap start, enter your card number and PIN, then choose an operation");
 }
 
-// Find the first number in the text: "deposit 50" -> 50
-function extractNumber(text) {
-  const match = text.replace(",", ".").match(/\d+(\.\d+)?/);
-  return match ? Number(match[0]) : null;
-}
-
-// Turn the recognized text into a command
-function handleCommand(rawText) {
-  const text = rawText.toLowerCase();
-  setVoiceText(`Heard: "${rawText}"`);
-
-  const has = (...words) => words.some((w) => text.includes(w));
-
-  // --- Doctor panel ---
-  if (isVisible("screen-doctor")) {
-    if (has("next", "call")) return callNext();
-    if (has("home", "back")) return showScreen("screen-home");
-  }
-
-  // --- Module selection (any screen) ---
-  if (has("doctor panel")) return showScreen("screen-doctor");
-  if (has("device", "esp")) return showScreen("screen-device");
-  if (has("hospital", "clinic", "doctor")) return openHospital();
-  if (!currentId && has("bank")) {
-    showScreen("screen-login");
-    return speak("Bank. Please enter your account ID and PIN");
-  }
-  if (!currentId && has("home", "back")) return showScreen("screen-home");
-
-  // --- Ticket screen ---
-  if (isVisible("screen-ticket")) {
-    if (has("repeat", "again")) return speak(lastTicketText);
-    if (has("status", "how many", "refresh")) return refreshTicket();
-    if (has("done", "finish", "okay")) return finishHospital();
-  }
-
-  // --- Hospital: department name ---
-  if (isVisible("screen-hospital")) {
-    if (has("general", "practice", "therapist")) return takeTicket("general");
-    if (has("cardio", "heart")) return takeTicket("cardiology");
-    if (has("pediatric", "child", "kid")) return takeTicket("pediatrics");
-    if (has("dent", "tooth", "teeth")) return takeTicket("dentistry");
-    return speak("Say a department: general practice, cardiology, pediatrics, or dentistry");
-  }
-
-  // --- Bank: before login only "register" works ---
-  if (!currentId) {
-    if (has("register", "new account", "open account")) return showScreen("screen-register");
-    return speak("Please log in first with your account ID and PIN");
-  }
-
-  const amount = extractNumber(text);
-
-  if (has("balance", "how much")) {
-    return refreshBalance();
-  }
-
-  if (has("deposit", "add", "put")) {
-    showScreen("screen-dashboard");
-    openAmountPanel("deposit");
-    if (amount) {
-      $("amount").value = amount;
-      confirmTransaction();
-    }
-    return;
-  }
-
-  if (has("withdraw", "take out", "cash")) {
-    showScreen("screen-dashboard");
-    openAmountPanel("withdraw");
-    if (amount) {
-      $("amount").value = amount;
-      confirmTransaction();
-    }
-    return;
-  }
-
-  if (has("history", "transactions")) {
-    return loadHistory();
-  }
-
-  if (has("back", "home", "menu")) {
-    closeAmountPanel();
-    return showScreen("screen-dashboard");
-  }
-
-  if (has("cancel")) {
-    closeAmountPanel();
-    return speak("Cancelled");
-  }
-
-  if (has("log out", "logout", "exit", "goodbye")) {
-    return logout();
-  }
-
-  // Amount panel is open and only a number was said: "100"
-  if (currentAction && amount) {
-    $("amount").value = amount;
-    return confirmTransaction();
-  }
-
-  speak("Sorry, I didn't understand. Say balance, deposit, withdraw, history, or log out");
-}
-
-function startListening() {
-  if (!SpeechRecognition) {
-    setVoiceText("This browser does not support speech recognition. Use Chrome.");
-    return speak("This browser does not support voice commands");
-  }
-
-  if (isListening) {
-    recognition.stop();
-    return;
-  }
-
-  recognition = new SpeechRecognition();
-  recognition.lang = VOICE_LANG;
-  recognition.interimResults = false;
-  recognition.maxAlternatives = 1;
-
-  recognition.onstart = () => {
-    isListening = true;
-    $("btn-voice").classList.add("listening");
-    setVoiceText("Listening...");
-  };
-
-  recognition.onresult = (e) => {
-    handleCommand(e.results[0][0].transcript);
-  };
-
-  recognition.onerror = (e) => {
-    const errors = {
-      "not-allowed": "Microphone permission was denied",
-      "no-speech": "No speech detected",
-      "network": "Speech recognition needs an internet connection",
-    };
-    setVoiceText(errors[e.error] || "Error: " + e.error);
-  };
-
-  recognition.onend = () => {
-    isListening = false;
-    $("btn-voice").classList.remove("listening");
-  };
-
-  recognition.start();
+function closeHelp() {
+  $("help-modal").classList.add("hidden");
 }
 
 
 // =====================================================
-//  BUTTON BINDINGS
+//  EVENTS
 // =====================================================
 
-// Home
-$("btn-module-bank").addEventListener("click", () => {
-  showScreen("screen-login");
-  speak("Bank. Please enter your account ID and PIN");
-});
-$("btn-module-hospital").addEventListener("click", openHospital);
-$("btn-module-doctor").addEventListener("click", () => showScreen("screen-doctor"));
-$("btn-module-device").addEventListener("click", () => {
-  showScreen("screen-device");
-  pingDevice();
-});
+// Welcome
+$("btn-start").addEventListener("click", () => openEntry("card"));
+$("card-slot").addEventListener("click", () => openEntry("card"));
+$("btn-go-register").addEventListener("click", openRegister);
 
-// Hospital
-$("btn-hospital-home").addEventListener("click", finishHospital);
-$("btn-ticket-refresh").addEventListener("click", () => refreshTicket());
-$("btn-ticket-repeat").addEventListener("click", () => speak(lastTicketText));
-$("btn-ticket-done").addEventListener("click", finishHospital);
-document.querySelectorAll("#departments button").forEach((btn) => {
-  btn.addEventListener("click", () => takeTicket(btn.dataset.dept));
+// Keypad
+document.querySelectorAll(".key").forEach((k) => {
+  k.addEventListener("click", () => pressKey(k.dataset.key));
 });
-
-// Doctor panel
-$("doctor-dept").addEventListener("change", loadQueue);
-$("btn-call-next").addEventListener("click", callNext);
-$("btn-doctor-home").addEventListener("click", () => showScreen("screen-home"));
-
-// ESP32
-$("btn-device-connect").addEventListener("click", connectDevice);
-$("btn-device-test").addEventListener("click", () => {
-  if (!deviceOnline) return showMsg("device-msg", "Connect to the device first", true);
-  notifyDevice("test", "Test");
-  showMsg("device-msg", "Test signal sent");
+document.querySelectorAll(".chip").forEach((c) => {
+  c.addEventListener("click", () => {
+    entryValue = c.dataset.amount;
+    renderEntry();
+  });
 });
-$("btn-device-disconnect").addEventListener("click", disconnectDevice);
-$("btn-device-home").addEventListener("click", () => showScreen("screen-home"));
-$("device-ip").addEventListener("keydown", (e) => e.key === "Enter" && connectDevice());
+$("btn-entry-submit").addEventListener("click", submitEntry);
+$("btn-entry-cancel").addEventListener("click", cancelEntry);
 
-// Bank
-$("btn-login").addEventListener("click", login);
-$("btn-login-home").addEventListener("click", () => showScreen("screen-home"));
-$("btn-go-register").addEventListener("click", () => showScreen("screen-register"));
-$("btn-register").addEventListener("click", register);
-$("btn-back-login").addEventListener("click", () => showScreen("screen-login"));
-
-$("btn-deposit").addEventListener("click", () => openAmountPanel("deposit"));
-$("btn-withdraw").addEventListener("click", () => openAmountPanel("withdraw"));
-$("btn-balance").addEventListener("click", refreshBalance);
-$("btn-history").addEventListener("click", loadHistory);
-$("btn-confirm").addEventListener("click", confirmTransaction);
-$("btn-cancel").addEventListener("click", () => {
-  closeAmountPanel();
-  showMsg("dash-msg", "");
-});
+// Menu
+$("tile-withdraw").addEventListener("click", () => openEntry("withdraw"));
+$("tile-deposit").addEventListener("click", () => openEntry("deposit"));
+$("tile-balance").addEventListener("click", (e) => withBusy(e.currentTarget, showBalance));
+$("tile-history").addEventListener("click", (e) => withBusy(e.currentTarget, showHistory));
+$("tile-help").addEventListener("click", openHelp);
 $("btn-logout").addEventListener("click", logout);
-$("btn-history-back").addEventListener("click", () => showScreen("screen-dashboard"));
 
-// Submit with the Enter key
-$("login-pin").addEventListener("keydown", (e) => e.key === "Enter" && login());
-$("reg-pin").addEventListener("keydown", (e) => e.key === "Enter" && register());
-$("amount").addEventListener("keydown", (e) => e.key === "Enter" && confirmTransaction());
-
-// Voice command: button or the "V" key (when not typing in a field)
-$("btn-voice").addEventListener("click", startListening);
-document.addEventListener("keydown", (e) => {
-  const typing = ["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement.tagName);
-  if (!typing && e.key.toLowerCase() === "v") startListening();
+// Balance / result / history
+$("btn-balance-back").addEventListener("click", () => {
+  $("balance-amount").textContent = "0.00";
+  goMenu();
 });
+$("btn-balance-withdraw").addEventListener("click", () => {
+  $("balance-amount").textContent = "0.00";
+  openEntry("withdraw");
+});
+$("btn-result-menu").addEventListener("click", () => goMenu());
+$("btn-result-logout").addEventListener("click", logout);
+$("btn-history-back").addEventListener("click", () => goMenu());
+
+// Register
+$("btn-register").addEventListener("click", (e) => withBusy(e.currentTarget, register));
+$("btn-register-back").addEventListener("click", goWelcome);
+$("reg-pin").addEventListener("keydown", (e) => e.key === "Enter" && $("btn-register").click());
+document.querySelectorAll("#reg-currency button").forEach((b) => {
+  b.addEventListener("click", () => {
+    document.querySelectorAll("#reg-currency button").forEach((x) => x.classList.remove("active"));
+    b.classList.add("active");
+  });
+});
+
+// Help
+$("btn-help").addEventListener("click", openHelp);
+$("btn-help-close").addEventListener("click", closeHelp);
+$("help-modal").addEventListener("click", (e) => e.target.id === "help-modal" && closeHelp());
+
+// Remove the red outline after the shake
+$("entry-display").addEventListener("animationend", () => {
+  setTimeout(() => $("entry-display").classList.remove("shake"), 600);
+});
+
+// Physical keyboard
+document.addEventListener("keydown", (e) => {
+  if (!$("help-modal").classList.contains("hidden")) {
+    if (e.key === "Escape") closeHelp();
+    return;
+  }
+
+  const typing = ["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement.tagName);
+  if (typing) return;
+
+  // Enter on a focused button already "clicks" it
+  if (e.key === "Enter" && document.activeElement.tagName === "BUTTON") return;
+
+  const onEntry = !$("screen-entry").classList.contains("hidden");
+
+  if (onEntry) {
+    if (/^[0-9]$/.test(e.key)) {
+      e.preventDefault();
+      pressKey(e.key);
+      flashKey(e.key);
+    } else if (e.key === "Backspace") {
+      e.preventDefault();
+      pressKey("back");
+      flashKey("back");
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      submitEntry();
+    } else if (e.key === "Escape") {
+      cancelEntry();
+    }
+    return;
+  }
+
+  if (e.key === "Escape" && session.id) goMenu();
+  if (e.key === "Enter" && !$("screen-welcome").classList.contains("hidden")) openEntry("card");
+});
+
+// Light up the on-screen key when typing on a real keyboard
+function flashKey(key) {
+  const el = document.querySelector(`.key[data-key="${key}"]`);
+  if (!el) return;
+  el.classList.add("pressed");
+  setTimeout(() => el.classList.remove("pressed"), 120);
+}
 
 
 // =====================================================
 //  STARTUP
 // =====================================================
-closeAmountPanel();
-showScreen("screen-home");
+goWelcome();
 
 checkHealth();
 setInterval(checkHealth, 5000);
 
-// Remember a previously connected ESP32
-const savedDevice = storageGet("resilinode-device");
-if (savedDevice) {
-  deviceUrl = savedDevice;
-  $("device-ip").value = savedDevice;
-}
-pingDevice();
-setInterval(pingDevice, 10000);
-
-// Auto-refresh depending on the open screen
-setInterval(() => {
-  if (isVisible("screen-ticket")) refreshTicket(true);
-  if (isVisible("screen-doctor")) loadQueue();
-}, 5000);
+updateClock();
+setInterval(updateClock, 10000);

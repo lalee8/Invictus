@@ -3,223 +3,327 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ResiliNode AI</title>
+  <title>Nodex ATM</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-  <!-- HEADER -->
-  <header>
-    <h1>ResiliNode AI</h1>
-    <div class="status-group">
-      <div class="status">
-        <span id="status-dot"></span>
-        <span id="status-text">Checking...</span>
-      </div>
-      <div class="status">
-        <span id="device-dot"></span>
-        <span id="device-text">ESP32: not connected</span>
-      </div>
+  <div class="kiosk">
+    <div class="glow glow-1" aria-hidden="true"></div>
+    <div class="glow glow-2" aria-hidden="true"></div>
+
+    <div class="screen-area">
+
+      <!-- ================= 1. WELCOME ================= -->
+      <section id="screen-welcome" class="screen welcome">
+        <div class="welcome-text">
+          <p class="kicker"><span class="kicker-dot"></span> ATM is ready</p>
+          <h1>Welcome</h1>
+          <p class="welcome-lead">To begin using this ATM’s services, tap <strong>Start</strong> and enter your card number.</p>
+
+          <div class="welcome-actions">
+            <button id="btn-start" class="btn btn-primary btn-lg">
+              Start
+              <svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+            </button>
+            <button id="btn-go-register" class="btn btn-outline">
+              <svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+              Open new account
+            </button>
+          </div>
+
+          <ul class="features">
+            <li><svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><path d="M11 5L6 9H2v6h4l5 4zM15.5 8.5a5 5 0 010 7M19 5a10 10 0 010 14"/></svg>Spoken results</li>
+            <li><svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Large keypad</li>
+            <li><svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/></svg>Secure PIN</li>
+          </ul>
+        </div>
+
+        <!-- Card slot illustration (click = start) -->
+        <button class="card-slot" id="card-slot" aria-label="Start">
+          <span class="slot-bar">TAP TO START</span>
+          <span class="slot-arrow" aria-hidden="true"></span>
+          <span class="v-card" aria-hidden="true">
+            <span class="v-card-stripe"></span>
+            <span class="v-card-chip"></span>
+            <span class="v-card-num">XXXX&nbsp;&nbsp;XXXX&nbsp;&nbsp;XX</span>
+            <span class="v-card-brand">NODEX</span>
+            <span class="v-card-circles"><i></i><i></i></span>
+          </span>
+        </button>
+      </section>
+
+      <!-- ================= 2. KEYPAD ENTRY (CARD / PIN / AMOUNT) ================= -->
+      <section id="screen-entry" class="screen entry">
+        <div class="entry-panel">
+
+          <!-- Live card preview (card number + PIN steps) -->
+          <div class="live-card" id="live-card" aria-hidden="true">
+            <div class="live-card-top">
+              <span class="live-chip"></span>
+              <span class="live-brand">NODEX</span>
+            </div>
+            <p class="live-number" id="live-number">•••• •••• ••</p>
+            <div class="live-card-bottom">
+              <span id="live-holder">CARD HOLDER</span>
+              <span class="live-circles"><i></i><i></i></span>
+            </div>
+          </div>
+
+          <!-- Step indicator -->
+          <ol class="steps" id="steps">
+            <li data-step="card">Card</li>
+            <li data-step="pin">PIN</li>
+            <li data-step="menu">Menu</li>
+          </ol>
+
+          <div class="entry-icon" id="entry-icon" aria-hidden="true"></div>
+          <h2 id="entry-title">Enter your card number</h2>
+          <p class="entry-sub" id="entry-sub">10 digits, printed on your card</p>
+
+          <div class="entry-display" id="entry-display" aria-live="polite">—</div>
+          <p class="entry-words" id="entry-words"></p>
+
+          <div class="quick" id="quick-amounts">
+            <button class="chip" data-amount="20">20</button>
+            <button class="chip" data-amount="50">50</button>
+            <button class="chip" data-amount="100">100</button>
+            <button class="chip" data-amount="200">200</button>
+          </div>
+
+          <p class="entry-msg" id="entry-msg"></p>
+
+          <button id="btn-entry-submit" class="btn btn-primary">Continue</button>
+          <button id="btn-entry-cancel" class="btn btn-cancel">
+            <svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M14 9l-4 3 4 3"/></svg>
+            Cancel
+          </button>
+        </div>
+
+        <span class="pointer" aria-hidden="true"></span>
+
+        <div class="keypad" id="keypad">
+          <button class="key" data-key="1">1</button>
+          <button class="key" data-key="2">2</button>
+          <button class="key" data-key="3">3</button>
+          <button class="key" data-key="4">4</button>
+          <button class="key" data-key="5">5</button>
+          <button class="key" data-key="6">6</button>
+          <button class="key" data-key="7">7</button>
+          <button class="key" data-key="8">8</button>
+          <button class="key" data-key="9">9</button>
+          <button class="key" data-key="0">0</button>
+          <button class="key key-back" data-key="back">
+            <svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><path d="M9 6h11v12H9l-6-6z"/><path d="M12 10l4 4M16 10l-4 4"/></svg>
+            Backspace
+          </button>
+        </div>
+      </section>
+
+      <!-- ================= 3. MAIN MENU ================= -->
+      <section id="screen-menu" class="screen menu">
+        <div class="menu-head">
+          <div>
+            <p class="greeting" id="menu-greeting">Good morning</p>
+            <h2 id="menu-name">Welcome</h2>
+          </div>
+          <div class="menu-head-right">
+            <span class="card-chip-tag">
+              <span class="tag-chip"></span>
+              <span id="menu-card">•••• ••</span>
+            </span>
+            <button id="btn-logout" class="btn-link-danger">
+              <svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M14 9l-4 3 4 3"/></svg>
+              LOG OUT
+            </button>
+          </div>
+        </div>
+
+        <div class="bento">
+          <button class="tile t-blue tile-big" id="tile-withdraw">
+            <svg viewBox="0 0 24 24" class="ico-xl" aria-hidden="true"><rect x="3" y="9" width="18" height="11" rx="1.5"/><circle cx="12" cy="14.5" r="2.5"/><path d="M9 6l3-3 3 3M12 3v5"/></svg>
+            <span>
+              <span class="tile-title">Withdraw Cash</span>
+              <span class="tile-sub">Fast cash from your account</span>
+            </span>
+            <span class="tile-arrow" aria-hidden="true">→</span>
+          </button>
+          <button class="tile t-teal" id="tile-balance">
+            <svg viewBox="0 0 24 24" class="ico-lg" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M15 10h6v4h-6a2 2 0 010-4z"/></svg>
+            <span class="tile-title">Check Balance</span>
+          </button>
+          <button class="tile t-indigo" id="tile-deposit">
+            <svg viewBox="0 0 24 24" class="ico-lg" aria-hidden="true"><rect x="3" y="9" width="18" height="11" rx="1.5"/><circle cx="12" cy="14.5" r="2.5"/><path d="M9 4l3 3 3-3M12 7V2"/></svg>
+            <span class="tile-title">Deposit Money</span>
+          </button>
+          <button class="tile t-orange" id="tile-history">
+            <svg viewBox="0 0 24 24" class="ico-lg" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg>
+            <span class="tile-title">Transaction History</span>
+          </button>
+          <button class="tile t-outline t-purple" id="tile-help">
+            <svg viewBox="0 0 24 24" class="ico-lg" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.01"/></svg>
+            <span class="tile-title">How it works</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- ================= 4. BALANCE ================= -->
+      <section id="screen-balance" class="screen balance">
+        <div class="balance-card" aria-hidden="true">
+          <div class="live-card-top">
+            <span class="live-chip"></span>
+            <span class="live-brand">NODEX</span>
+          </div>
+          <p class="live-number" id="balance-card-number">•••• •••• ••</p>
+          <div class="live-card-bottom">
+            <span id="balance-holder">CARD HOLDER</span>
+            <span class="live-circles"><i></i><i></i></span>
+          </div>
+        </div>
+
+        <div class="balance-info">
+          <p class="kicker"><span class="kicker-dot"></span> Available balance</p>
+          <p class="balance-big"><span id="balance-symbol">₼</span><span id="balance-amount">0.00</span></p>
+          <p class="info-words" id="balance-words"></p>
+
+          <div class="stat-row">
+            <div class="stat">
+              <span class="stat-label">Currency</span>
+              <span class="stat-value" id="balance-currency">AZN</span>
+            </div>
+            <div class="stat">
+              <span class="stat-label">Updated</span>
+              <span class="stat-value" id="balance-time">—</span>
+            </div>
+          </div>
+
+          <div class="row">
+            <button id="btn-balance-withdraw" class="btn btn-outline">Withdraw</button>
+            <button id="btn-balance-back" class="btn btn-primary">Back to menu</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= 5. RESULT (receipt) ================= -->
+      <section id="screen-result" class="screen result">
+        <div class="printer" aria-hidden="true"></div>
+        <div class="receipt">
+          <div class="check" aria-hidden="true">
+            <svg viewBox="0 0 52 52"><circle cx="26" cy="26" r="24"/><path d="M15 27l7 7 15-16"/></svg>
+          </div>
+          <h2 id="result-title">Withdrawal successful</h2>
+          <p class="result-amount" id="result-amount">₼ 0</p>
+          <p class="info-words" id="result-note">Please take your cash</p>
+          <dl class="meta">
+            <dt>Card</dt><dd id="result-card">—</dd>
+            <dt>Reference</dt><dd id="result-ref">—</dd>
+            <dt>Date</dt><dd id="result-time">—</dd>
+          </dl>
+          <p class="receipt-thanks">Thank you for banking with Nodex</p>
+        </div>
+        <div class="result-actions">
+          <button id="btn-result-menu" class="btn btn-primary">Back to menu <span id="result-countdown"></span></button>
+          <button id="btn-result-logout" class="btn btn-cancel">Finish and log out</button>
+        </div>
+      </section>
+
+      <!-- ================= 6. HISTORY ================= -->
+      <section id="screen-history" class="screen list">
+        <div class="list-head">
+          <div>
+            <h2>Transaction History</h2>
+            <p class="entry-sub" id="history-summary">—</p>
+          </div>
+          <button id="btn-history-back" class="btn btn-outline btn-sm">Back to menu</button>
+        </div>
+        <div class="timeline" id="history-list"></div>
+      </section>
+
+      <!-- ================= 7. REGISTER ================= -->
+      <section id="screen-register" class="screen register">
+        <div class="form-panel">
+          <h2>Open new account</h2>
+          <p class="entry-sub">A new card number will be created for you</p>
+
+          <label for="reg-name">Full name</label>
+          <input type="text" id="reg-name" placeholder="Full name" autocomplete="off">
+
+          <label for="reg-pin">Choose a 4-digit PIN</label>
+          <input type="password" id="reg-pin" maxlength="4" inputmode="numeric" placeholder="••••">
+
+          <p class="label">Currency</p>
+          <div class="segmented" id="reg-currency">
+            <button data-value="AZN" class="active">₼ AZN</button>
+            <button data-value="USD">$ USD</button>
+            <button data-value="EUR">€ EUR</button>
+          </div>
+
+          <p class="entry-msg" id="reg-msg"></p>
+
+          <button id="btn-register" class="btn btn-primary">Create account</button>
+          <button id="btn-register-back" class="btn btn-cancel">
+            <svg viewBox="0 0 24 24" class="ico" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M14 9l-4 3 4 3"/></svg>
+            Cancel
+          </button>
+        </div>
+
+        <!-- New card appears here after creating the account -->
+        <div class="new-card-area">
+          <div class="balance-card new-card" id="new-card">
+            <div class="live-card-top">
+              <span class="live-chip"></span>
+              <span class="live-brand">NODEX</span>
+            </div>
+            <p class="live-number" id="new-card-number">•••• •••• ••</p>
+            <div class="live-card-bottom">
+              <span id="new-card-holder">YOUR NAME</span>
+              <span class="live-circles"><i></i><i></i></span>
+            </div>
+          </div>
+          <p class="new-card-note" id="new-card-note">Your card preview</p>
+          <button id="btn-use-card" class="btn btn-primary hidden">Log in with this card</button>
+        </div>
+      </section>
+
     </div>
-  </header>
 
-  <main>
+    <!-- ================= BOTTOM BAR ================= -->
+    <footer class="kiosk-bar">
+      <button id="btn-help" class="btn-help">HELP</button>
 
-    <!-- 0. HOME: module selection -->
-    <section id="screen-home">
-      <h2>Choose a service</h2>
-      <div class="modules">
-        <button id="btn-module-bank" class="module-btn">
-          <span class="module-icon">🏦</span>
-          Bank
-        </button>
-        <button id="btn-module-hospital" class="module-btn hospital">
-          <span class="module-icon">🏥</span>
-          Hospital
-        </button>
+      <div class="bar-status">
+        <span class="pill"><span id="status-dot" class="dot"></span><span id="status-text">Checking…</span></span>
+        <span class="pill clock" id="clock">--:--</span>
       </div>
 
-      <div class="tools">
-        <button id="btn-module-doctor" class="secondary">👩‍⚕️ Doctor panel</button>
-        <button id="btn-module-device" class="secondary">🔌 ESP32 device</button>
+      <div class="brand">
+        <svg viewBox="0 0 32 32" class="brand-logo" aria-hidden="true">
+          <rect x="3" y="7" width="26" height="18" rx="3"/>
+          <path d="M3 12h26"/>
+          <path d="M8 20h6"/>
+          <circle cx="23" cy="20" r="2"/>
+        </svg>
+        <div>
+          <p class="brand-name">NODEX</p>
+          <p class="brand-sub">ACCESSIBLE BANKING</p>
+        </div>
       </div>
-    </section>
+    </footer>
+  </div>
 
-    <!-- 1. LOGIN -->
-    <section id="screen-login">
-      <h2>Login</h2>
-
-      <label for="login-id">Account ID</label>
-      <input type="number" id="login-id" placeholder="e.g. 3">
-
-      <label for="login-pin">PIN</label>
-      <input type="password" id="login-pin" maxlength="4" inputmode="numeric" placeholder="4 digits">
-
-      <button id="btn-login">Log in</button>
-      <button id="btn-go-register">Open new account</button>
-      <button id="btn-login-home" class="secondary">Home</button>
-
-      <p class="msg" id="login-msg"></p>
-    </section>
-
-    <!-- 2. REGISTER -->
-    <section id="screen-register">
-      <h2>New account</h2>
-
-      <label for="reg-name">Full name</label>
-      <input type="text" id="reg-name" placeholder="Full name">
-
-      <label for="reg-pin">PIN</label>
-      <input type="password" id="reg-pin" maxlength="4" inputmode="numeric" placeholder="4 digits">
-
-      <label for="reg-currency">Currency</label>
-      <select id="reg-currency">
-        <option value="AZN">AZN</option>
-        <option value="USD">USD</option>
-        <option value="EUR">EUR</option>
-      </select>
-
-      <button id="btn-register">Open account</button>
-      <button id="btn-back-login">Back</button>
-
-      <p class="msg" id="reg-msg"></p>
-    </section>
-
-    <!-- 3. DASHBOARD -->
-    <section id="screen-dashboard">
-      <h2>Welcome</h2>
-
-      <p>Account: <span id="dash-number">-</span></p>
-      <p>Balance: <span id="dash-balance">0.00</span></p>
-
-      <div class="actions">
-        <button id="btn-deposit">Deposit</button>
-        <button id="btn-withdraw">Withdraw</button>
-        <button id="btn-balance">Balance</button>
-        <button id="btn-history">History</button>
-      </div>
-
-      <div id="amount-panel">
-        <label for="amount">Amount</label>
-        <input type="number" id="amount" min="1" placeholder="Amount">
-        <button id="btn-confirm">Confirm</button>
-        <button id="btn-cancel">Cancel</button>
-      </div>
-
-      <button id="btn-logout">Log out</button>
-
-      <p class="msg" id="dash-msg"></p>
-    </section>
-
-    <!-- 4. HISTORY -->
-    <section id="screen-history">
-      <h2>Transaction history</h2>
-
-      <table>
-        <thead>
-          <tr>
-            <th>Date</th>
-            <th>Type</th>
-            <th>Amount</th>
-            <th>Balance</th>
-          </tr>
-        </thead>
-        <tbody id="history-body"></tbody>
-      </table>
-
-      <button id="btn-history-back">Back</button>
-    </section>
-
-    <!-- 5. HOSPITAL: department selection -->
-    <section id="screen-hospital">
-      <h2>Doctor queue</h2>
-
-      <label for="patient-name">Full name</label>
-      <input type="text" id="patient-name" placeholder="Full name">
-
-      <p class="label-like">Choose a department</p>
-      <div class="actions" id="departments">
-        <button data-dept="general">🩺 General Practice</button>
-        <button data-dept="cardiology">❤️ Cardiology</button>
-        <button data-dept="pediatrics">👶 Pediatrics</button>
-        <button data-dept="dentistry">🦷 Dentistry</button>
-      </div>
-
-      <button id="btn-hospital-home" class="secondary">Home</button>
-
-      <p class="msg" id="hospital-msg"></p>
-    </section>
-
-    <!-- 6. HOSPITAL: queue ticket -->
-    <section id="screen-ticket">
-      <h2>Your queue ticket</h2>
-
-      <div class="ticket">
-        <p class="badge hidden" id="ticket-offline">⚠️ Offline ticket</p>
-        <p class="ticket-dept" id="ticket-dept">-</p>
-        <p class="ticket-number" id="ticket-number">-</p>
-        <p id="ticket-name">-</p>
-        <p>People ahead: <strong id="ticket-ahead">0</strong></p>
-        <p>Estimated wait: <strong id="ticket-wait">0</strong> min</p>
-        <p class="ticket-status" id="ticket-status">Waiting</p>
-        <p class="ticket-time" id="ticket-time">-</p>
-      </div>
-
-      <button id="btn-ticket-refresh">🔄 Refresh status</button>
-      <button id="btn-ticket-repeat">🔊 Read again</button>
-      <button id="btn-ticket-done" class="secondary">Done</button>
-    </section>
-
-    <!-- 7. DOCTOR PANEL -->
-    <section id="screen-doctor">
-      <h2>Doctor panel</h2>
-
-      <label for="doctor-dept">Department</label>
-      <select id="doctor-dept">
-        <option value="general">General Practice</option>
-        <option value="cardiology">Cardiology</option>
-        <option value="pediatrics">Pediatrics</option>
-        <option value="dentistry">Dentistry</option>
-      </select>
-
-      <div class="now-serving">
-        <p>Now serving:</p>
-        <p class="ticket-number" id="doctor-current">—</p>
-        <p id="doctor-current-name"></p>
-      </div>
-
-      <button id="btn-call-next" class="success">📢 Call next patient</button>
-
-      <p class="label-like">Waiting (<span id="doctor-count">0</span>)</p>
-      <ul id="doctor-waiting" class="waiting-list"></ul>
-
-      <button id="btn-doctor-home" class="secondary">Home</button>
-      <p class="msg" id="doctor-msg"></p>
-    </section>
-
-    <!-- 8. ESP32 DEVICE -->
-    <section id="screen-device">
-      <h2>ESP32 device</h2>
-
-      <label for="device-ip">Device address</label>
-      <input type="text" id="device-ip" placeholder="http://192.168.1.50 or http://resilinode.local">
-
-      <button id="btn-device-connect">Connect</button>
-      <button id="btn-device-test" class="secondary">🔔 Send test signal</button>
-      <button id="btn-device-disconnect" class="secondary">Disconnect</button>
-
-      <div class="device-info" id="device-info">No data</div>
-
-      <button id="btn-device-home" class="secondary">Home</button>
-      <p class="msg" id="device-msg"></p>
-    </section>
-
-  </main>
-
-  <!-- VOICE COMMAND (visible on every screen) -->
-  <div id="voice-box">
-    <p id="voice-text" aria-live="polite">Press the mic and speak</p>
-    <button id="btn-voice" aria-label="Voice command">🎤 Voice command</button>
+  <!-- ================= HELP MODAL ================= -->
+  <div class="modal hidden" id="help-modal" role="dialog" aria-modal="true" aria-labelledby="help-title">
+    <div class="modal-box">
+      <h2 id="help-title">How to use this ATM</h2>
+      <ol>
+        <li>Tap <strong>Start</strong> and type your 10-digit <strong>card number</strong>.</li>
+        <li>Enter your 4-digit <strong>PIN</strong>.</li>
+        <li>Choose an operation: withdraw, deposit, balance or history.</li>
+        <li>Use the on-screen keypad or your keyboard. <kbd>Enter</kbd> confirms, <kbd>Esc</kbd> cancels.</li>
+      </ol>
+      <p class="modal-note">No card yet? Tap <strong>Open new account</strong> on the welcome screen.</p>
+      <button id="btn-help-close" class="btn btn-primary">Got it</button>
+    </div>
   </div>
 
   <script src="app.js"></script>

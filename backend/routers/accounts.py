@@ -1,4 +1,3 @@
-
 import secrets
 from decimal import Decimal
 
@@ -13,7 +12,9 @@ from schemas import (
     AccountResponse,
     TransactionRequest,
     BalanceResponse,
-    TransactionResponse
+    TransactionResponse,
+    LoginRequest,
+    LoginResponse
 )
 
 router = APIRouter(prefix="/accounts", tags=["Accounts"])
@@ -63,6 +64,24 @@ def create_account(data: AccountCreate, db: Session = Depends(get_db)):
     db.add(account)
     db.commit()
     db.refresh(account)
+
+    return account
+
+
+@router.post("/login", response_model=LoginResponse)
+def login(data: LoginRequest, db: Session = Depends(get_db)):
+    """Log in with card (account) number and PIN"""
+
+    account = db.query(Account).filter(
+        Account.account_number == data.account_number
+    ).first()
+
+    # Same message for wrong card and wrong PIN (safer)
+    if not account or not password_hash.verify(data.pin, account.pin_hash):
+        raise HTTPException(status_code=401, detail="Invalid card number or PIN")
+
+    if not account.is_active:
+        raise HTTPException(status_code=403, detail="Account is inactive")
 
     return account
 

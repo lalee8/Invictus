@@ -1,4 +1,3 @@
-
 from pydantic import BaseModel, Field, ConfigDict
 from decimal import Decimal
 
@@ -18,6 +17,20 @@ class AccountResponse(BaseModel):
     balance: Decimal
     currency: str
     is_active: bool
+
+
+class LoginRequest(BaseModel):
+    account_number: str = Field(pattern=r"^\d{10}$")
+    pin: str = Field(pattern=r"^\d{4}$")
+
+
+class LoginResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    account_number: str
+    owner_name: str
+    currency: str
 
 
 class TransactionRequest(BaseModel):
